@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "pi-review-code",
+      "dependencies": {
+        "@sinclair/typebox": "^0.34.49",
+      },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
         "@mariozechner/pi-coding-agent": "^0.65.2",
