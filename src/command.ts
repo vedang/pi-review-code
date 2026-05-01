@@ -7,9 +7,20 @@ import type {
 
 export const REVIEW_USAGE = [
   "Usage:",
-  "  /review diff-against <ref>",
-  "  /review prompt <review request>",
-  "  /review pr <github-url|gitlab-url|github-number>",
+  "  /review <review request>",
+  "  /review-fix [latest|run-id]",
+  "  /review-diff-against <ref>",
+  "  /review-pr <github-url|gitlab-url|github-number>",
+].join("\n");
+
+export const REVIEW_DIFF_AGAINST_USAGE = [
+  "Usage:",
+  "  /review-diff-against <ref>",
+].join("\n");
+
+export const REVIEW_PR_USAGE = [
+  "Usage:",
+  "  /review-pr <github-url|gitlab-url|github-number>",
 ].join("\n");
 
 export const REVIEW_FIX_USAGE = [
@@ -109,49 +120,69 @@ function requireSingleArg(
   return args[0].trim();
 }
 
-function parseReviewTarget(targetKind: string, args: string[]): ReviewTarget {
-  if (targetKind === "diff-against") {
-    const ref = requireSingleArg(
-      args,
-      "/review diff-against requires a ref or change id.",
-      "/review diff-against accepts exactly one ref or change id.",
-    );
-    return {
-      kind: "diff-against",
-      ref,
-      targetHint: ref,
-    };
+function parsePromptText(input: string): ReviewCommand {
+  const args = tokenizeCommandArgs(input);
+
+  if (args.length === 0) {
+    throw new Error(REVIEW_USAGE);
   }
 
-  if (targetKind === "prompt") {
-    const promptText = args.join(" ").trim();
-    if (isBlank(promptText)) {
-      throw new Error("/review prompt requires a review request.");
-    }
+  const promptText = args.join(" ").trim();
+  if (isBlank(promptText)) {
+    throw new Error(REVIEW_USAGE);
+  }
 
-    return {
+  return {
+    kind: "review",
+    target: {
       kind: "prompt",
       prompt: promptText,
       targetHint: promptText,
-    };
-  }
+    },
+  };
+}
 
-  if (targetKind === "pr") {
-    const selector = requireSingleArg(
-      args,
-      "/review pr requires a GitHub URL, GitLab URL, or GitHub number.",
-      "/review pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
-    );
-    return {
-      kind: "pr",
-      selector,
-      targetHint: selector,
-    };
-  }
-
-  throw new Error(
-    `Unknown /review target "${targetKind}". Expected diff-against, prompt, or pr.`,
+function parseReviewDiffAgainstTargetArgs(args: string[]): ReviewTarget {
+  const ref = requireSingleArg(
+    args,
+    "/review-diff-against requires a ref or change id.",
+    "/review-diff-against accepts exactly one ref or change id.",
   );
+
+  return {
+    kind: "diff-against",
+    ref,
+    targetHint: ref,
+  };
+}
+
+function parseReviewPrTargetArgs(args: string[]): ReviewTarget {
+  const selector = requireSingleArg(
+    args,
+    "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
+    "/review-pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
+  );
+
+  return {
+    kind: "pr",
+    selector,
+    targetHint: selector,
+  };
+}
+
+function parseReviewSelectorArgs(
+  commandName: "diff-against" | "pr",
+  args: string[],
+): ReviewCommand {
+  const target =
+    commandName === "diff-against"
+      ? parseReviewDiffAgainstTargetArgs(args)
+      : parseReviewPrTargetArgs(args);
+
+  return {
+    kind: "review",
+    target,
+  };
 }
 
 function parseReviewFixSelector(args: string[]): ReviewFixSelector {
@@ -175,18 +206,15 @@ function parseReviewFixSelector(args: string[]): ReviewFixSelector {
 }
 
 export function parseReviewArgs(input: string): ReviewCommand {
-  const args = tokenizeCommandArgs(input);
+  return parsePromptText(input);
+}
 
-  if (args.length === 0) {
-    throw new Error(REVIEW_USAGE);
-  }
+export function parseReviewDiffAgainstArgs(input: string): ReviewCommand {
+  return parseReviewSelectorArgs("diff-against", tokenizeCommandArgs(input));
+}
 
-  const target = parseReviewTarget(args[0], args.slice(1));
-
-  return {
-    kind: "review",
-    target,
-  };
+export function parseReviewPrArgs(input: string): ReviewCommand {
+  return parseReviewSelectorArgs("pr", tokenizeCommandArgs(input));
 }
 
 export function parseReviewFixArgs(input: string): ReviewFixCommand {

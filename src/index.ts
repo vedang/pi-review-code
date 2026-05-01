@@ -25,9 +25,10 @@ import { resolveReviewTarget } from "./targets.js";
 export const REVIEW_HELP_TEXT = [
   "pi-review-code review flow is installed.",
   "Usage:",
-  "- /review diff-against <ref>",
-  "- /review prompt <review request>",
-  "- /review pr <github-url|gitlab-url|github-number>",
+  "- /review <review request>",
+  "- /review-fix [latest|run-id]",
+  "- /review-diff-against <ref>",
+  "- /review-pr <github-url|gitlab-url|github-number>",
 ].join("\n");
 
 export const REVIEW_FIX_HELP_TEXT = [
@@ -117,6 +118,18 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
       pi,
       "review",
       "Start a context-rich code review",
+      REVIEW_HELP_TEXT,
+    );
+    registerInfoCommand(
+      pi,
+      "review-diff-against",
+      "Start a context-rich code review from local diff",
+      REVIEW_HELP_TEXT,
+    );
+    registerInfoCommand(
+      pi,
+      "review-pr",
+      "Start a context-rich code review from a PR",
       REVIEW_HELP_TEXT,
     );
     return;
@@ -215,6 +228,28 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
       }
 
       await controller.handleReviewCommand(args, ctx);
+    },
+  });
+
+  pi.registerCommand("review-diff-against", {
+    description: "Start a context-rich code review from local diff",
+    handler: async (args, ctx) => {
+      if (!ctx.hasUI) {
+        return;
+      }
+
+      await controller.handleReviewDiffAgainstCommand(args, ctx);
+    },
+  });
+
+  pi.registerCommand("review-pr", {
+    description: "Start a context-rich code review from a PR",
+    handler: async (args, ctx) => {
+      if (!ctx.hasUI) {
+        return;
+      }
+
+      await controller.handleReviewPrCommand(args, ctx);
     },
   });
 }

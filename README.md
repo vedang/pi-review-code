@@ -19,37 +19,15 @@ For project-local discovery, keep the package configured through its `pi.extensi
 
 ## Commands
 
-### `/review diff-against <ref>`
-
-Review the current local diff against a git ref:
-
-```text
-/review diff-against origin/main
-```
-
-The prompt draft includes changed files, diff stats, and safe command hints such as `git --no-pager diff <ref>`.
-
-### `/review prompt <request>`
+### `/review <review request>`
 
 Review a free-form aspect of the codebase:
 
 ```text
-/review prompt review the database schema and ensure column names are sensible
+/review review the database schema and ensure column names are sensible
 ```
 
 The prompt draft turns the request into concrete inspection guidance.
-
-### `/review pr <github-url|gitlab-url|github-number>`
-
-Review a GitHub PR or GitLab MR through `gh`/`glab` metadata and diff commands:
-
-```text
-/review pr https://github.com/owner/repo/pull/123
-/review pr https://gitlab.com/group/project/-/merge_requests/123
-/review pr 123
-```
-
-Number-only selectors currently resolve GitHub PRs for the current repository. MVP behavior does not checkout or switch VCS branches.
 
 ### `/review-fix [latest|run-id]`
 
@@ -62,6 +40,28 @@ Start a same-session fix branch for comments from a completed review:
 ```
 
 The fix prompt lists selected comments one by one with priorities and references. The fix branch collapses back with a summary of attempted fixes.
+
+### `/review-diff-against <ref>`
+
+Review the current local diff against a git ref:
+
+```text
+/review-diff-against origin/main
+```
+
+The prompt draft includes changed files, diff stats, and safe command hints such as `git --no-pager diff <ref>`.
+
+### `/review-pr <github-url|gitlab-url|github-number>`
+
+Review a GitHub PR or GitLab MR through `gh`/`glab` metadata and diff commands:
+
+```text
+/review-pr https://github.com/owner/repo/pull/123
+/review-pr https://gitlab.com/group/project/-/merge_requests/123
+/review-pr 123
+```
+
+Number-only selectors currently resolve GitHub PRs for the current repository. MVP behavior does not checkout or switch VCS branches.
 
 ## Review lifecycle
 

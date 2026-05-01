@@ -5,7 +5,12 @@ import type {
   SessionBeforeTreeEvent,
 } from "@mariozechner/pi-coding-agent";
 
-import { parseReviewArgs, parseReviewFixArgs } from "./command.js";
+import {
+  parseReviewArgs,
+  parseReviewDiffAgainstArgs,
+  parseReviewFixArgs,
+  parseReviewPrArgs,
+} from "./command.js";
 import type {
   PiReviewThinkingLevel,
   ReviewPromptDraftGenerationResult,
@@ -457,6 +462,14 @@ type ReviewFlowController = {
     args: string,
     ctx: ExtensionCommandContext,
   ) => Promise<void>;
+  handleReviewDiffAgainstCommand: (
+    args: string,
+    ctx: ExtensionCommandContext,
+  ) => Promise<void>;
+  handleReviewPrCommand: (
+    args: string,
+    ctx: ExtensionCommandContext,
+  ) => Promise<void>;
   handleReviewFixCommand: (
     args: string,
     ctx: ExtensionCommandContext,
@@ -647,14 +660,10 @@ export function createReviewFlowController(
     ReviewBranchSummary | FixBranchSummary
   >();
 
-  async function handleReviewCommand(
-    args: string,
+  async function launchReview(
+    target: ReviewTarget,
     ctx: ExtensionCommandContext,
   ) {
-    if (!ctx.hasUI) {
-      return;
-    }
-
     const model = ctx.model;
     if (model === undefined) {
       ctx.ui.notify(
@@ -666,19 +675,6 @@ export function createReviewFlowController(
 
     await ctx.waitForIdle();
 
-    let command: ReturnType<typeof parseReviewArgs>;
-    try {
-      command = parseReviewArgs(args);
-    } catch (error) {
-      ctx.ui.notify(
-        error instanceof Error
-          ? error.message
-          : "Cannot start review: invalid command arguments.",
-        "error",
-      );
-      return;
-    }
-
     const originLeafId = ensureOriginLeafId(ctx, dependencies.pi);
     if (originLeafId === null) {
       ctx.ui.notify("Cannot start review: no current branch leaf id.", "error");
@@ -687,7 +683,7 @@ export function createReviewFlowController(
 
     let resolvedTarget: ResolvedReviewTarget;
     try {
-      resolvedTarget = await dependencies.resolveTarget(command.target);
+      resolvedTarget = await dependencies.resolveTarget(target);
     } catch (error) {
       ctx.ui.notify(
         error instanceof Error
@@ -756,6 +752,78 @@ export function createReviewFlowController(
     dependencies.pi.sendUserMessage(editedPrompt);
   }
 
+  async function handleReviewCommand(
+    args: string,
+    ctx: ExtensionCommandContext,
+  ) {
+    if (!ctx.hasUI) {
+      return;
+    }
+
+    let command: ReturnType<typeof parseReviewArgs>;
+    try {
+      command = parseReviewArgs(args);
+    } catch (error) {
+      ctx.ui.notify(
+        error instanceof Error
+          ? error.message
+          : "Cannot start review: invalid command arguments.",
+        "error",
+      );
+      return;
+    }
+
+    await launchReview(command.target, ctx);
+  }
+
+  async function handleReviewDiffAgainstCommand(
+    args: string,
+    ctx: ExtensionCommandContext,
+  ) {
+    if (!ctx.hasUI) {
+      return;
+    }
+
+    let command: ReturnType<typeof parseReviewDiffAgainstArgs>;
+    try {
+      command = parseReviewDiffAgainstArgs(args);
+    } catch (error) {
+      ctx.ui.notify(
+        error instanceof Error
+          ? error.message
+          : "Cannot start review: invalid command arguments.",
+        "error",
+      );
+      return;
+    }
+
+    await launchReview(command.target, ctx);
+  }
+
+  async function handleReviewPrCommand(
+    args: string,
+    ctx: ExtensionCommandContext,
+  ) {
+    if (!ctx.hasUI) {
+      return;
+    }
+
+    let command: ReturnType<typeof parseReviewPrArgs>;
+    try {
+      command = parseReviewPrArgs(args);
+    } catch (error) {
+      ctx.ui.notify(
+        error instanceof Error
+          ? error.message
+          : "Cannot start review: invalid command arguments.",
+        "error",
+      );
+      return;
+    }
+
+    await launchReview(command.target, ctx);
+  }
+
   async function startFixRunIfSupported(
     ctx: ExtensionCommandContext,
     runInfo: ReviewFixRunInfo,
@@ -775,7 +843,6 @@ export function createReviewFlowController(
       originThinkingLevel: runInfo.originThinkingLevel,
     });
   }
-
   async function handleReviewFixCommand(
     args: string,
     ctx: ExtensionCommandContext,
@@ -874,6 +941,8 @@ export function createReviewFlowController(
 
   return {
     handleReviewCommand,
+    handleReviewDiffAgainstCommand,
+    handleReviewPrCommand,
     handleReviewFixCommand,
     async handleAgentEnd(event, ctx): Promise<void> {
       if (activeRun === null) {

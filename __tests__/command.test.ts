@@ -2,38 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  REVIEW_DIFF_AGAINST_USAGE,
   REVIEW_FIX_USAGE,
+  REVIEW_PR_USAGE,
   REVIEW_USAGE,
   parseReviewArgs,
+  parseReviewDiffAgainstArgs,
   parseReviewFixArgs,
+  parseReviewPrArgs,
 } from "../src/command.js";
 
-test("parses /review diff-against target", () => {
-  assert.deepEqual(parseReviewArgs("diff-against origin/main"), {
-    kind: "review",
-    target: {
-      kind: "diff-against",
-      ref: "origin/main",
-      targetHint: "origin/main",
-    },
-  });
-});
-
-test("parses quoted /review diff-against target", () => {
-  assert.deepEqual(parseReviewArgs('diff-against "change id"'), {
-    kind: "review",
-    target: {
-      kind: "diff-against",
-      ref: "change id",
-      targetHint: "change id",
-    },
-  });
-});
-
-test("parses /review prompt target as free-form review request", () => {
+test("parses /review free-form request as prompt target", () => {
   assert.deepEqual(
     parseReviewArgs(
-      "prompt review the database schema and ensure column names are sensible",
+      "review the database schema and ensure column names are sensible",
     ),
     {
       kind: "review",
@@ -48,9 +30,9 @@ test("parses /review prompt target as free-form review request", () => {
   );
 });
 
-test("parses quoted words inside /review prompt free-form text", () => {
+test("parses quoted words inside /review free-form text", () => {
   assert.deepEqual(
-    parseReviewArgs('prompt review "database schema" and "column names"'),
+    parseReviewArgs('review "database schema" and "column names"'),
     {
       kind: "review",
       target: {
@@ -62,9 +44,75 @@ test("parses quoted words inside /review prompt free-form text", () => {
   );
 });
 
-test("parses /review pr target", () => {
+test("treats old /review subcommands as free-form prompt text", () => {
+  assert.deepEqual(parseReviewArgs("diff-against origin/main"), {
+    kind: "review",
+    target: {
+      kind: "prompt",
+      prompt: "diff-against origin/main",
+      targetHint: "diff-against origin/main",
+    },
+  });
+  assert.deepEqual(parseReviewArgs("pr https://github.com/owner/repo/pull/1"), {
+    kind: "review",
+    target: {
+      kind: "prompt",
+      prompt: "pr https://github.com/owner/repo/pull/1",
+      targetHint: "pr https://github.com/owner/repo/pull/1",
+    },
+  });
+});
+
+test("rejects missing /review request with exact usage", () => {
+  assert.throws(() => parseReviewArgs(""), new Error(REVIEW_USAGE));
+});
+
+test("parses /review-diff-against target", () => {
+  assert.deepEqual(parseReviewDiffAgainstArgs("origin/main"), {
+    kind: "review",
+    target: {
+      kind: "diff-against",
+      ref: "origin/main",
+      targetHint: "origin/main",
+    },
+  });
+});
+
+test("parses quoted /review-diff-against target", () => {
+  assert.deepEqual(parseReviewDiffAgainstArgs('"change id"'), {
+    kind: "review",
+    target: {
+      kind: "diff-against",
+      ref: "change id",
+      targetHint: "change id",
+    },
+  });
+});
+
+test("rejects missing /review-diff-against ref", () => {
+  assert.throws(
+    () => parseReviewDiffAgainstArgs(""),
+    new Error("/review-diff-against requires a ref or change id."),
+  );
+});
+
+test("rejects extra /review-diff-against args", () => {
+  assert.throws(
+    () => parseReviewDiffAgainstArgs("origin/main extra"),
+    new Error("/review-diff-against accepts exactly one ref or change id."),
+  );
+});
+
+test("rejects empty quoted /review-diff-against ref", () => {
+  assert.throws(
+    () => parseReviewDiffAgainstArgs('""'),
+    new Error("/review-diff-against requires a ref or change id."),
+  );
+});
+
+test("parses /review-pr target", () => {
   assert.deepEqual(
-    parseReviewArgs("pr https://github.com/owner/repo/pull/123"),
+    parseReviewPrArgs("https://github.com/owner/repo/pull/123"),
     {
       kind: "review",
       target: {
@@ -76,8 +124,8 @@ test("parses /review pr target", () => {
   );
 });
 
-test("parses quoted /review pr target", () => {
-  assert.deepEqual(parseReviewArgs('pr "group/project!42"'), {
+test("parses quoted /review-pr target", () => {
+  assert.deepEqual(parseReviewPrArgs('"group/project!42"'), {
     kind: "review",
     target: {
       kind: "pr",
@@ -87,84 +135,59 @@ test("parses quoted /review pr target", () => {
   });
 });
 
-test("rejects missing /review args with exact usage", () => {
-  assert.throws(() => parseReviewArgs(""), new Error(REVIEW_USAGE));
-});
-
-test("rejects unknown /review target kind", () => {
+test("rejects missing /review-pr selector", () => {
   assert.throws(
-    () => parseReviewArgs("files src/index.ts"),
+    () => parseReviewPrArgs(""),
     new Error(
-      'Unknown /review target "files". Expected diff-against, prompt, or pr.',
+      "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
     ),
   );
 });
 
-test("rejects missing /review diff-against ref", () => {
+test("rejects extra /review-pr args", () => {
   assert.throws(
-    () => parseReviewArgs("diff-against"),
-    new Error("/review diff-against requires a ref or change id."),
-  );
-});
-
-test("rejects extra /review diff-against args", () => {
-  assert.throws(
-    () => parseReviewArgs("diff-against origin/main extra"),
-    new Error("/review diff-against accepts exactly one ref or change id."),
-  );
-});
-
-test("rejects empty quoted /review diff-against ref", () => {
-  assert.throws(
-    () => parseReviewArgs('diff-against ""'),
-    new Error("/review diff-against requires a ref or change id."),
-  );
-});
-
-test("rejects missing /review prompt text", () => {
-  assert.throws(
-    () => parseReviewArgs("prompt"),
-    new Error("/review prompt requires a review request."),
-  );
-});
-
-test("rejects empty quoted /review prompt text", () => {
-  assert.throws(
-    () => parseReviewArgs('prompt ""'),
-    new Error("/review prompt requires a review request."),
-  );
-});
-
-test("rejects missing /review pr selector", () => {
-  assert.throws(
-    () => parseReviewArgs("pr"),
+    () => parseReviewPrArgs("123 extra"),
     new Error(
-      "/review pr requires a GitHub URL, GitLab URL, or GitHub number.",
+      "/review-pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
     ),
   );
 });
 
-test("rejects extra /review pr args", () => {
+test("rejects empty quoted /review-pr selector", () => {
   assert.throws(
-    () => parseReviewArgs("pr 123 extra"),
+    () => parseReviewPrArgs('""'),
     new Error(
-      "/review pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
+      "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
     ),
   );
 });
 
-test("rejects empty quoted /review pr selector", () => {
-  assert.throws(
-    () => parseReviewArgs('pr ""'),
-    new Error(
-      "/review pr requires a GitHub URL, GitLab URL, or GitHub number.",
-    ),
+test("review-specific usage constants mention renamed commands", () => {
+  assert.match(REVIEW_USAGE, /\/review <review request>/);
+  assert.match(REVIEW_USAGE, /\/review-diff-against <ref>/);
+  assert.match(
+    REVIEW_USAGE,
+    /\/review-pr <github-url\|gitlab-url\|github-number>/,
+  );
+  assert.match(REVIEW_USAGE, /\/review-fix \[latest\|run-id\]/);
+  assert.match(REVIEW_DIFF_AGAINST_USAGE, /\/review-diff-against <ref>/);
+  assert.match(
+    REVIEW_PR_USAGE,
+    /\/review-pr <github-url\|gitlab-url\|github-number>/,
   );
 });
 
 test("rejects unterminated quotes", () => {
   assert.throws(
-    () => parseReviewArgs('prompt "unfinished'),
+    () => parseReviewArgs('review "unfinished'),
+    new Error("Unterminated quote in command arguments."),
+  );
+  assert.throws(
+    () => parseReviewDiffAgainstArgs('"unfinished'),
+    new Error("Unterminated quote in command arguments."),
+  );
+  assert.throws(
+    () => parseReviewPrArgs('"unfinished'),
     new Error("Unterminated quote in command arguments."),
   );
 });

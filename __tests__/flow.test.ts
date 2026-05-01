@@ -194,7 +194,7 @@ test("review flow launches branch after human submits generated prompt", async (
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
 
@@ -208,6 +208,13 @@ test("review flow launches branch after human submits generated prompt", async (
     initialValue: "Generated review prompt",
   });
   assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
+  assert.deepEqual(harness.resolvedTargets, [
+    {
+      kind: "prompt",
+      prompt: "review auth boundaries",
+      targetHint: "review auth boundaries",
+    },
+  ]);
   assert.deepEqual(harness.startedRuns, [
     {
       runId: "review-1",
@@ -229,7 +236,7 @@ test("review flow anchors an empty session before branch launch", async () => {
   });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
 
@@ -278,7 +285,7 @@ test("review flow launches PR review after resolving PR metadata", async () => {
     },
   });
 
-  await harness.controller.handleReviewCommand(`pr ${selector}`, harness.ctx);
+  await harness.controller.handleReviewPrCommand(selector, harness.ctx);
 
   assert.deepEqual(harness.resolvedTargets, [
     { kind: "pr", selector, targetHint: selector },
@@ -339,8 +346,8 @@ test("review flow passes resolved diff text to prompt draft builder", async () =
   };
   const harness = createHarness({ editorResult: "Edited prompt", target });
 
-  await harness.controller.handleReviewCommand(
-    "diff-against origin/main",
+  await harness.controller.handleReviewDiffAgainstCommand(
+    "origin/main",
     harness.ctx,
   );
 
@@ -354,7 +361,7 @@ test("review flow cancels cleanly when editor returns undefined", async () => {
   const harness = createHarness({ editorResult: undefined });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
 
@@ -370,7 +377,7 @@ test("review flow fails closed when LLM draft generation fails", async () => {
   const harness = createHarness({ draftOk: false });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
 
@@ -386,7 +393,7 @@ test("review flow rejects non-interactive command contexts", async () => {
   const harness = createHarness({ hasUI: false });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
 
@@ -399,7 +406,7 @@ test("review flow requires active model", async () => {
   const harness = createHarness({ model: null });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
 
@@ -416,7 +423,7 @@ test("review flow emits custom prompt and summary messages for renderers", async
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
 
@@ -452,7 +459,7 @@ test("review flow collapses active branch on agent end with custom summary", asy
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
   await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
@@ -478,7 +485,7 @@ test("review flow ignores unrelated agent_end events", async () => {
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
   await harness.controller.handleAgentEnd(
@@ -505,7 +512,7 @@ test("review flow keeps active state when collapse is cancelled", async () => {
   });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
   await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
@@ -535,7 +542,7 @@ test("review flow keeps active state when collapse throws", async () => {
   });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
   await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
@@ -559,7 +566,7 @@ test("session_before_tree returns pending review summary in Pi event shape", asy
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
   await harness.controller.handleReviewCommand(
-    "prompt review auth boundaries",
+    "review auth boundaries",
     harness.ctx,
   );
   await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {

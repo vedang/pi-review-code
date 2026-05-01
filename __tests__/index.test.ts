@@ -148,6 +148,8 @@ test("extension registers review commands and message renderers", () => {
   const harness = createHarness();
 
   assert.ok(harness.commands.has("review"));
+  assert.ok(harness.commands.has("review-diff-against"));
+  assert.ok(harness.commands.has("review-pr"));
   assert.ok(harness.commands.has("review-fix"));
   assert.ok(harness.messageRenderers.has("pi-review-code:prompt"));
   assert.ok(harness.messageRenderers.has("pi-review-code:review-summary"));
@@ -158,6 +160,26 @@ test("/review shows scaffold help", async () => {
   const harness = createHarness();
 
   await runCommand(harness, "review");
+
+  assert.deepEqual(harness.notifications, [
+    { message: REVIEW_HELP_TEXT, level: "info" },
+  ]);
+});
+
+test("/review-diff-against shows scaffold help without runtime support", async () => {
+  const harness = createHarness();
+
+  await runCommand(harness, "review-diff-against");
+
+  assert.deepEqual(harness.notifications, [
+    { message: REVIEW_HELP_TEXT, level: "info" },
+  ]);
+});
+
+test("/review-pr shows scaffold help without runtime support", async () => {
+  const harness = createHarness();
+
+  await runCommand(harness, "review-pr");
 
   assert.deepEqual(harness.notifications, [
     { message: REVIEW_HELP_TEXT, level: "info" },
