@@ -1,11 +1,7 @@
 import type {
   ReviewCommand,
-  ReviewDiffAgainstTarget,
   ReviewFixCommand,
-  ReviewFixRunIdSelector,
   ReviewFixSelector,
-  ReviewPrTarget,
-  ReviewPromptTarget,
   ReviewTarget,
 } from "./types";
 
@@ -98,24 +94,33 @@ function isBlank(value: string | undefined): boolean {
   return value === undefined || value.trim().length === 0;
 }
 
+function requireSingleArg(
+  args: string[],
+  missingMessage: string,
+  extraMessage: string,
+): string {
+  if (args.length < 1 || isBlank(args[0])) {
+    throw new Error(missingMessage);
+  }
+  if (args.length > 1) {
+    throw new Error(extraMessage);
+  }
+
+  return args[0].trim();
+}
+
 function parseReviewTarget(targetKind: string, args: string[]): ReviewTarget {
   if (targetKind === "diff-against") {
-    if (args.length < 1 || isBlank(args[0])) {
-      throw new Error("/review diff-against requires a ref or change id.");
-    }
-    if (args.length > 1) {
-      throw new Error(
-        "/review diff-against accepts exactly one ref or change id.",
-      );
-    }
-
-    const ref = args[0].trim();
-    const target: ReviewDiffAgainstTarget = {
+    const ref = requireSingleArg(
+      args,
+      "/review diff-against requires a ref or change id.",
+      "/review diff-against accepts exactly one ref or change id.",
+    );
+    return {
       kind: "diff-against",
       ref,
       targetHint: ref,
     };
-    return target;
   }
 
   if (targetKind === "prompt") {
@@ -124,31 +129,24 @@ function parseReviewTarget(targetKind: string, args: string[]): ReviewTarget {
       throw new Error("/review prompt requires a review request.");
     }
 
-    const target: ReviewPromptTarget = {
+    return {
       kind: "prompt",
       prompt: promptText,
       targetHint: promptText,
     };
-    return target;
   }
 
   if (targetKind === "pr") {
-    if (args.length < 1 || isBlank(args[0])) {
-      throw new Error("/review pr requires a PR/MR URL, number, or ref.");
-    }
-    if (args.length > 1) {
-      throw new Error(
-        "/review pr accepts exactly one PR/MR URL, number, or ref.",
-      );
-    }
-
-    const selector = args[0].trim();
-    const target: ReviewPrTarget = {
+    const selector = requireSingleArg(
+      args,
+      "/review pr requires a PR/MR URL, number, or ref.",
+      "/review pr accepts exactly one PR/MR URL, number, or ref.",
+    );
+    return {
       kind: "pr",
       selector,
       targetHint: selector,
     };
-    return target;
   }
 
   throw new Error(
@@ -170,11 +168,10 @@ function parseReviewFixSelector(args: string[]): ReviewFixSelector {
     return { kind: "latest" };
   }
 
-  const selector: ReviewFixRunIdSelector = {
+  return {
     kind: "run-id",
     runId: selectorText,
   };
-  return selector;
 }
 
 export function parseReviewArgs(input: string): ReviewCommand {
@@ -184,12 +181,7 @@ export function parseReviewArgs(input: string): ReviewCommand {
     throw new Error(REVIEW_USAGE);
   }
 
-  const targetKind = args[0];
-  if (!targetKind) {
-    throw new Error(REVIEW_USAGE);
-  }
-
-  const target = parseReviewTarget(targetKind, args.slice(1));
+  const target = parseReviewTarget(args[0], args.slice(1));
 
   return {
     kind: "review",
