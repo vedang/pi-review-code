@@ -1,1 +1,5 @@
 .agents/plans/
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
