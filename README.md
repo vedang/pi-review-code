@@ -1,5 +1,7 @@
 # pi-review-code
 
+![pi-review-code banner](images/banner.png)
+
 Context-rich code review extension for Pi.
 
 `pi-review-code` makes human context first-class: it resolves a review target, asks the current model to draft a detailed review prompt, lets you edit that prompt, then launches an isolated same-session review branch. When the branch finishes, Pi collapses back with review findings.

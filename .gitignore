@@ -4,3 +4,4 @@ dist/
 coverage/
 *.tsbuildinfo
 .pi/extensions/simplify-code.json
+.pi/generated-images/
