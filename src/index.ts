@@ -4,7 +4,7 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 
 import { registerAddReviewCommentTool } from "./comments";
-import { type ReviewStateManager, createReviewStateManager } from "./state";
+import { createReviewStateManager } from "./state";
 
 export const REVIEW_HELP_TEXT = [
   "pi-review-code scaffold is installed.",
@@ -24,22 +24,21 @@ export const REVIEW_FIX_HELP_TEXT = [
   "Review comment selection and fix branch lifecycle will be added later.",
 ].join("\n");
 
-type ReviewRuntimeAPI = ExtensionAPI &
-  Pick<
-    ExtensionAPI,
-    "registerTool" | "appendEntry" | "getActiveTools" | "setActiveTools"
-  >;
+type ReviewRuntimeMethods = Pick<
+  ExtensionAPI,
+  "registerTool" | "appendEntry" | "getActiveTools" | "setActiveTools"
+>;
+
+type ReviewRuntimeAPI = ExtensionAPI & ReviewRuntimeMethods;
 
 function isReviewRuntime(pi: ExtensionAPI): pi is ReviewRuntimeAPI {
+  const candidate = pi as Partial<Record<keyof ReviewRuntimeMethods, unknown>>;
+
   return (
-    typeof (pi as ExtensionAPI & { registerTool?: unknown }).registerTool ===
-      "function" &&
-    typeof (pi as ExtensionAPI & { appendEntry?: unknown }).appendEntry ===
-      "function" &&
-    typeof (pi as ExtensionAPI & { getActiveTools?: unknown })
-      .getActiveTools === "function" &&
-    typeof (pi as ExtensionAPI & { setActiveTools?: unknown })
-      .setActiveTools === "function"
+    typeof candidate.registerTool === "function" &&
+    typeof candidate.appendEntry === "function" &&
+    typeof candidate.getActiveTools === "function" &&
+    typeof candidate.setActiveTools === "function"
   );
 }
 
@@ -48,7 +47,7 @@ function registerReviewRuntimeHelpers(pi: ExtensionAPI): void {
     return;
   }
 
-  const stateManager: ReviewStateManager = createReviewStateManager(pi);
+  const stateManager = createReviewStateManager(pi);
 
   registerAddReviewCommentTool(pi, {
     getState: () => stateManager.getState(),

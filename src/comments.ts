@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 import {
+  type AddReviewCommentReference,
   REVIEW_COMMENT_ENTRY_TYPE,
   REVIEW_COMMENT_PRIORITIES,
   REVIEW_STATE_VERSION,
@@ -15,7 +16,7 @@ const ADD_REVIEW_COMMENT_TOOL_NAME = "add_review_comment";
 const REFERENCE_ERROR =
   "Each reference must include a non-empty filePath, integer startLine >= 1, and integer endLine >= startLine when provided.";
 
-const REVIEW_COMMENT_PRIORITY_SET = new Set<ReviewCommentPriority>(
+const REVIEW_COMMENT_PRIORITY_SET: ReadonlySet<string> = new Set(
   REVIEW_COMMENT_PRIORITIES,
 );
 
@@ -38,21 +39,15 @@ const addReviewCommentSchema = Type.Object({
   ),
 });
 
+type NormalizedAddReviewCommentInput = {
+  priority: ReviewCommentPriority;
+  comment: string;
+  references: AddReviewCommentReference[];
+};
+
 export type AddReviewCommentNormalizeResult =
-  | {
-      value: {
-        priority: ReviewCommentPriority;
-        comment: string;
-        references: Array<{
-          filePath: string;
-          startLine: number;
-          endLine?: number;
-        }>;
-      };
-    }
-  | {
-      error: string;
-    };
+  | { value: NormalizedAddReviewCommentInput }
+  | { error: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -67,53 +62,58 @@ function isValidPriority(value: unknown): value is ReviewCommentPriority {
     return false;
   }
 
-  return REVIEW_COMMENT_PRIORITY_SET.has(value as ReviewCommentPriority);
+  return REVIEW_COMMENT_PRIORITY_SET.has(value);
 }
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1;
 }
 
-function normalizeReference(raw: unknown):
-  | {
-      value: { filePath: string; startLine: number; endLine?: number };
-    }
-  | { error: string } {
-  if (!isRecord(raw)) {
-    return { error: REFERENCE_ERROR };
-  }
-
-  if (typeof raw.filePath !== "string") {
+function normalizeReference(
+  raw: unknown,
+): { value: AddReviewCommentReference } | { error: string } {
+  if (!isRecord(raw) || typeof raw.filePath !== "string") {
     return { error: REFERENCE_ERROR };
   }
 
   const filePath = normalizeFilePath(raw.filePath);
+  const startLine = raw.startLine;
+  const endLine = raw.endLine;
 
-  if (filePath.length === 0) {
-    return { error: REFERENCE_ERROR };
-  }
-
-  const startLineRaw = raw.startLine;
-  const endLineRaw = raw.endLine;
-
-  if (!isPositiveInteger(startLineRaw)) {
-    return { error: REFERENCE_ERROR };
-  }
-
-  if (endLineRaw !== undefined && !isPositiveInteger(endLineRaw)) {
-    return { error: REFERENCE_ERROR };
-  }
-
-  if (endLineRaw !== undefined && endLineRaw < startLineRaw) {
+  if (
+    filePath.length === 0 ||
+    !isPositiveInteger(startLine) ||
+    (endLine !== undefined && !isPositiveInteger(endLine)) ||
+    (endLine !== undefined && endLine < startLine)
+  ) {
     return { error: REFERENCE_ERROR };
   }
 
   return {
     value:
-      endLineRaw === undefined
-        ? { filePath, startLine: startLineRaw }
-        : { filePath, startLine: startLineRaw, endLine: endLineRaw },
+      endLine === undefined
+        ? { filePath, startLine }
+        : { filePath, startLine, endLine },
   };
+}
+
+function normalizeReferences(
+  raw: unknown,
+): { value: AddReviewCommentReference[] } | { error: string } {
+  if (!Array.isArray(raw)) {
+    return { error: REFERENCE_ERROR };
+  }
+
+  const references: AddReviewCommentReference[] = [];
+  for (const reference of raw) {
+    const normalizedReference = normalizeReference(reference);
+    if ("error" in normalizedReference) {
+      return normalizedReference;
+    }
+    references.push(normalizedReference.value);
+  }
+
+  return { value: references };
 }
 
 export function normalizeAddReviewCommentInput(
@@ -141,27 +141,12 @@ export function normalizeAddReviewCommentInput(
     return { value: { priority, comment, references: [] } };
   }
 
-  if (!Array.isArray(raw.references)) {
-    return { error: REFERENCE_ERROR };
+  const references = normalizeReferences(raw.references);
+  if ("error" in references) {
+    return references;
   }
 
-  const references: Array<{
-    filePath: string;
-    startLine: number;
-    endLine?: number;
-  }> = [];
-
-  for (const reference of raw.references) {
-    const normalizedReference = normalizeReference(reference);
-
-    if ("error" in normalizedReference) {
-      return normalizedReference;
-    }
-
-    references.push(normalizedReference.value);
-  }
-
-  return { value: { priority, comment, references } };
+  return { value: { priority, comment, references: references.value } };
 }
 
 export type AddReviewCommentSourceState =
@@ -291,29 +276,8 @@ export function getReviewCommentsForRun(
       continue;
     }
 
-    const referencesRaw = data.references;
-    if (!Array.isArray(referencesRaw)) {
-      continue;
-    }
-
-    const references: Array<{
-      filePath: string;
-      startLine: number;
-      endLine?: number;
-    }> = [];
-    let validReferences = true;
-
-    for (const rawReference of referencesRaw) {
-      const normalizedReference = normalizeReference(rawReference);
-      if ("error" in normalizedReference) {
-        validReferences = false;
-        break;
-      }
-
-      references.push(normalizedReference.value);
-    }
-
-    if (!validReferences) {
+    const references = normalizeReferences(data.references);
+    if ("error" in references) {
       continue;
     }
 
@@ -323,7 +287,7 @@ export function getReviewCommentsForRun(
       runId: commentRunId,
       priority,
       comment,
-      references,
+      references: references.value,
       createdAt,
       targetHint: typeof data.targetHint === "string" ? data.targetHint : "",
     });

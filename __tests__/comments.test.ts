@@ -8,6 +8,33 @@ import {
   registerAddReviewCommentTool,
 } from "../src/comments";
 
+type ToolExecute = (
+  toolCallId: string,
+  params: unknown,
+  signal: AbortSignal | undefined,
+  onUpdate: unknown,
+  ctx: unknown,
+) => Promise<unknown>;
+
+type RegisteredReviewTool = {
+  name: string;
+  promptSnippet?: string;
+  promptGuidelines?: string[];
+  execute: ToolExecute;
+};
+
+function executeTool(execute: ToolExecute, params: unknown): Promise<unknown> {
+  return execute("call-1", params, undefined, undefined, {});
+}
+
+function commentEntry(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: "custom",
+    customType: REVIEW_COMMENT_ENTRY_TYPE,
+    data,
+  };
+}
+
 test("normalizes add_review_comment input", () => {
   const result = normalizeAddReviewCommentInput({
     priority: "P2",
@@ -49,25 +76,12 @@ test("validates add_review_comment required fields and references", () => {
 });
 
 test("registerAddReviewCommentTool persists comments tied to active review run", async () => {
-  let registeredTool:
-    | {
-        name: string;
-        promptSnippet?: string;
-        promptGuidelines?: string[];
-        execute: (
-          toolCallId: string,
-          params: unknown,
-          signal: AbortSignal | undefined,
-          onUpdate: unknown,
-          ctx: unknown,
-        ) => Promise<unknown>;
-      }
-    | undefined;
+  let registeredTool: RegisteredReviewTool | undefined;
   const appended: Array<{ customType: string; data: unknown }> = [];
 
   registerAddReviewCommentTool(
     {
-      registerTool: (tool: NonNullable<typeof registeredTool>) => {
+      registerTool: (tool: RegisteredReviewTool) => {
         registeredTool = tool;
       },
       appendEntry: (customType: string, data: unknown) => {
@@ -99,17 +113,11 @@ test("registerAddReviewCommentTool persists comments tied to active review run",
     "Do not call add_review_comment when no actionable finding exists.",
   ]);
 
-  const result = await registeredTool.execute(
-    "call-1",
-    {
-      priority: "P1",
-      comment: "Possible null dereference",
-      references: [{ filePath: "src/a.ts", startLine: 42 }],
-    },
-    undefined,
-    undefined,
-    {},
-  );
+  const result = await executeTool(registeredTool.execute, {
+    priority: "P1",
+    comment: "Possible null dereference",
+    references: [{ filePath: "src/a.ts", startLine: 42 }],
+  });
 
   assert.deepEqual(appended, [
     {
@@ -135,19 +143,11 @@ test("registerAddReviewCommentTool persists comments tied to active review run",
 });
 
 test("add_review_comment throws while no review run is active", async () => {
-  let execute:
-    | ((
-        toolCallId: string,
-        params: unknown,
-        signal: AbortSignal | undefined,
-        onUpdate: unknown,
-        ctx: unknown,
-      ) => Promise<unknown>)
-    | undefined;
+  let execute: ToolExecute | undefined;
 
   registerAddReviewCommentTool(
     {
-      registerTool: (tool: { execute: NonNullable<typeof execute> }) => {
+      registerTool: (tool: { execute: ToolExecute }) => {
         execute = tool.execute;
       },
       appendEntry: () => {},
@@ -155,17 +155,10 @@ test("add_review_comment throws while no review run is active", async () => {
     { getState: () => ({ version: 1, activeKind: null }) },
   );
 
-  const executeTool = execute;
-  assert.ok(executeTool);
+  const registeredExecute = execute;
+  assert.ok(registeredExecute);
   await assert.rejects(
-    () =>
-      executeTool(
-        "call-1",
-        { priority: "P1", comment: "x" },
-        undefined,
-        undefined,
-        {},
-      ),
+    () => executeTool(registeredExecute, { priority: "P1", comment: "x" }),
     /inactive review run/,
   );
 });
@@ -175,45 +168,33 @@ test("getReviewCommentsForRun filters and ignores malformed persisted comments",
     {
       sessionManager: {
         getEntries: () => [
-          {
-            type: "custom",
-            customType: REVIEW_COMMENT_ENTRY_TYPE,
-            data: {
-              version: 1,
-              id: "good-1",
-              runId: "run-1",
-              priority: "P1",
-              comment: "one",
-              references: [],
-              createdAt: 1,
-            },
-          },
-          {
-            type: "custom",
-            customType: REVIEW_COMMENT_ENTRY_TYPE,
-            data: {
-              version: 1,
-              id: "other-run",
-              runId: "run-2",
-              priority: "P1",
-              comment: "two",
-              references: [],
-              createdAt: 2,
-            },
-          },
-          {
-            type: "custom",
-            customType: REVIEW_COMMENT_ENTRY_TYPE,
-            data: {
-              version: 1,
-              id: "bad-reference",
-              runId: "run-1",
-              priority: "P2",
-              comment: "bad",
-              references: [{}],
-              createdAt: 3,
-            },
-          },
+          commentEntry({
+            version: 1,
+            id: "good-1",
+            runId: "run-1",
+            priority: "P1",
+            comment: "one",
+            references: [],
+            createdAt: 1,
+          }),
+          commentEntry({
+            version: 1,
+            id: "other-run",
+            runId: "run-2",
+            priority: "P1",
+            comment: "two",
+            references: [],
+            createdAt: 2,
+          }),
+          commentEntry({
+            version: 1,
+            id: "bad-reference",
+            runId: "run-1",
+            priority: "P2",
+            comment: "bad",
+            references: [{}],
+            createdAt: 3,
+          }),
         ],
       },
     } as never,
