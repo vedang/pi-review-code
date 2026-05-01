@@ -94,4 +94,4 @@ Collapsed views show target, run id, and first findings. Expanded views show ful
 - Interactive UI is required for prompt editing.
 - Prompt drafting fails closed if no current model/auth is available.
 - PR support depends on installed/authenticated `gh` or `glab`.
-- Active in-memory branch collapse state does not resume after extension reload.
+- Active branch auto-collapse state does not resume after extension reload.

@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 
 import {
+  REVIEW_ANCHOR_MESSAGE_TYPE,
   REVIEW_PROMPT_ENTRY_TYPE,
   REVIEW_SUMMARY_ENTRY_TYPE,
   buildReviewBranchSummary,
@@ -41,6 +42,8 @@ type HarnessOptions = {
   draftOk?: boolean;
   navigateResults?: Array<{ cancelled: boolean } | Error>;
   target?: ResolvedReviewTarget;
+  initialLeafId?: string | null;
+  anchorLeafId?: string;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -51,6 +54,7 @@ function createHarness(options: HarnessOptions = {}) {
     content?: unknown;
     display?: boolean;
     details?: unknown;
+    options?: unknown;
   }> = [];
   const appended: Array<{ customType: string; data: unknown }> = [];
   const navigateCalls: Array<{
@@ -66,6 +70,9 @@ function createHarness(options: HarnessOptions = {}) {
   const target = options.target ?? promptTarget();
   const draftOk = options.draftOk ?? true;
   const navigateResults = [...(options.navigateResults ?? [])];
+  const anchorLeafId = options.anchorLeafId ?? "leaf-anchor";
+  let leafId =
+    options.initialLeafId === undefined ? "leaf-origin" : options.initialLeafId;
 
   const controller = createReviewFlowController({
     pi: {
@@ -75,13 +82,23 @@ function createHarness(options: HarnessOptions = {}) {
       appendEntry: (customType: string, data: unknown) => {
         appended.push({ customType, data });
       },
-      sendMessage: (message: {
-        customType?: string;
-        content?: unknown;
-        display?: boolean;
-        details?: unknown;
-      }) => {
-        sentMessages.push(message);
+      sendMessage: (
+        message: {
+          customType?: string;
+          content?: unknown;
+          display?: boolean;
+          details?: unknown;
+        },
+        sendOptions?: unknown,
+      ) => {
+        sentMessages.push({ ...message, options: sendOptions });
+        if (
+          message.customType === REVIEW_ANCHOR_MESSAGE_TYPE &&
+          leafId === null &&
+          sendOptions !== undefined
+        ) {
+          leafId = anchorLeafId;
+        }
       },
     },
     stateManager: {
@@ -123,7 +140,7 @@ function createHarness(options: HarnessOptions = {}) {
         : (options.model ?? { provider: "anthropic", id: "claude-sonnet" }),
     modelRegistry: { registry: true },
     sessionManager: {
-      getLeafId: () => "leaf-origin",
+      getLeafId: () => leafId,
       getEntries: () => [],
     },
     waitForIdle: async () => {},
@@ -200,6 +217,34 @@ test("review flow launches branch after human submits generated prompt", async (
     },
   ]);
   assert.equal(harness.draftRequests.length, 1);
+});
+
+test("review flow anchors an empty session before branch launch", async () => {
+  const harness = createHarness({
+    initialLeafId: null,
+    editorResult: "Edited review prompt",
+  });
+
+  await harness.controller.handleReviewCommand(
+    "prompt review auth boundaries",
+    harness.ctx,
+  );
+
+  assert.equal(harness.sentMessages[0]?.customType, REVIEW_ANCHOR_MESSAGE_TYPE);
+  assert.equal(harness.sentMessages[0]?.display, false);
+  assert.deepEqual(harness.sentMessages[0]?.options, { triggerTurn: false });
+  assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
+  assert.deepEqual(harness.startedRuns, [
+    {
+      runId: "review-1",
+      originLeafId: "leaf-anchor",
+      targetHint: "review auth boundaries",
+      reviewPrompt: "Edited review prompt",
+      originModelProvider: "anthropic",
+      originModelId: "claude-sonnet",
+      originThinkingLevel: "high",
+    },
+  ]);
 });
 
 test("review flow launches PR review after resolving PR metadata", async () => {

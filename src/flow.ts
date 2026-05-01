@@ -556,12 +556,15 @@ function ensureOriginLeafId(
     return existingLeafId;
   }
 
-  runtime.sendMessage?.({
-    customType: REVIEW_ANCHOR_MESSAGE_TYPE,
-    content: "pi-review-code review anchor",
-    display: false,
-    details: { purpose: "Anchor empty session before review branch." },
-  });
+  runtime.sendMessage?.(
+    {
+      customType: REVIEW_ANCHOR_MESSAGE_TYPE,
+      content: "pi-review-code review anchor",
+      display: false,
+      details: { purpose: "Anchor empty session before review branch." },
+    },
+    { triggerTurn: false },
+  );
 
   return getLeafId(ctx);
 }

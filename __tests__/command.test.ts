@@ -138,21 +138,27 @@ test("rejects empty quoted /review prompt text", () => {
 test("rejects missing /review pr selector", () => {
   assert.throws(
     () => parseReviewArgs("pr"),
-    new Error("/review pr requires a PR/MR URL, number, or ref."),
+    new Error(
+      "/review pr requires a GitHub URL, GitLab URL, or GitHub number.",
+    ),
   );
 });
 
 test("rejects extra /review pr args", () => {
   assert.throws(
     () => parseReviewArgs("pr 123 extra"),
-    new Error("/review pr accepts exactly one PR/MR URL, number, or ref."),
+    new Error(
+      "/review pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
+    ),
   );
 });
 
 test("rejects empty quoted /review pr selector", () => {
   assert.throws(
     () => parseReviewArgs('pr ""'),
-    new Error("/review pr requires a PR/MR URL, number, or ref."),
+    new Error(
+      "/review pr requires a GitHub URL, GitLab URL, or GitHub number.",
+    ),
   );
 });
 

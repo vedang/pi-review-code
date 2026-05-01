@@ -23,7 +23,7 @@ export const REVIEW_HELP_TEXT = [
   "Usage:",
   "- /review diff-against <ref>",
   "- /review prompt <review request>",
-  "- /review pr <url-or-ref>",
+  "- /review pr <github-url|gitlab-url|github-number>",
 ].join("\n");
 
 export const REVIEW_FIX_HELP_TEXT = [
@@ -155,6 +155,9 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
     getThinkingLevel: () => pi.getThinkingLevel() as PiReviewThinkingLevel,
   });
 
+  pi.on("session_start", (_event, ctx) => {
+    stateManager.refresh(ctx);
+  });
   pi.on("agent_end", (event, ctx) => controller.handleAgentEnd(event, ctx));
   pi.on("session_before_tree", (event) =>
     controller.handleSessionBeforeTree(event),

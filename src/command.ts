@@ -9,7 +9,7 @@ export const REVIEW_USAGE = [
   "Usage:",
   "  /review diff-against <ref>",
   "  /review prompt <review request>",
-  "  /review pr <url-or-ref>",
+  "  /review pr <github-url|gitlab-url|github-number>",
 ].join("\n");
 
 export const REVIEW_FIX_USAGE = [
@@ -139,8 +139,8 @@ function parseReviewTarget(targetKind: string, args: string[]): ReviewTarget {
   if (targetKind === "pr") {
     const selector = requireSingleArg(
       args,
-      "/review pr requires a PR/MR URL, number, or ref.",
-      "/review pr accepts exactly one PR/MR URL, number, or ref.",
+      "/review pr requires a GitHub URL, GitLab URL, or GitHub number.",
+      "/review pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
     );
     return {
       kind: "pr",
