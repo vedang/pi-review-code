@@ -117,3 +117,94 @@ export interface ReviewComment {
   createdAt: number;
   targetHint: string;
 }
+
+export type CommandInvocation = {
+  command: string;
+  args: string[];
+};
+
+export type ReviewTargetCommandHint = CommandInvocation & {
+  label: string;
+};
+
+export type ExecResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+};
+
+export type ExecCommand = (
+  command: string,
+  args: string[],
+) => Promise<ExecResult>;
+
+export type GitHubPrSelector = {
+  kind: "github";
+  selector: string;
+  owner?: string;
+  repo?: string;
+  number: number;
+};
+
+export type GitLabMrSelector = {
+  kind: "gitlab";
+  selector: string;
+  host: string;
+  projectPath: string;
+  number: number;
+};
+
+export type ResolvedDiffAgainstTarget = {
+  kind: "diff-against";
+  ref: string;
+  targetHint: string;
+  files: string[];
+  diffStat: string;
+  commandHints: ReviewTargetCommandHint[];
+};
+
+export type ResolvedPromptTarget = {
+  kind: "prompt";
+  targetHint: string;
+  prompt: string;
+  commandHints: ReviewTargetCommandHint[];
+};
+
+export type ResolvedGitHubPrMetadata = {
+  provider: "github";
+  number: number;
+  title: string;
+  body: string;
+  url: string;
+  author: string;
+  baseRefName: string;
+  headRefName: string;
+  files: string[];
+  existingNotes: string[];
+};
+
+export type ResolvedGitLabMrMetadata = {
+  provider: "gitlab";
+  number: number;
+  title: string;
+  body: string;
+  url: string;
+  author: string;
+  baseRefName: string;
+  headRefName: string;
+  files: string[];
+  existingNotes: string[];
+};
+
+export type ResolvedPrTarget = {
+  kind: "pr";
+  targetHint: string;
+  selector: string;
+  files: string[];
+  commandHints: ReviewTargetCommandHint[];
+} & (ResolvedGitHubPrMetadata | ResolvedGitLabMrMetadata);
+
+export type ResolvedReviewTarget =
+  | ResolvedDiffAgainstTarget
+  | ResolvedPromptTarget
+  | ResolvedPrTarget;
