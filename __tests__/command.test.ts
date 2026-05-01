@@ -6,7 +6,7 @@ import {
   REVIEW_USAGE,
   parseReviewArgs,
   parseReviewFixArgs,
-} from "../src/command";
+} from "../src/command.js";
 
 test("parses /review diff-against target", () => {
   assert.deepEqual(parseReviewArgs("diff-against origin/main"), {

@@ -10,9 +10,9 @@ import {
   buildFixBranchSummary,
   createReviewFlowController,
   selectReviewSummaryForFix,
-} from "../src/flow";
-import { buildReviewFixPrompt } from "../src/prompts";
-import type { ReviewComment } from "../src/types";
+} from "../src/flow.js";
+import { buildReviewFixPrompt } from "../src/prompts.js";
+import type { ReviewComment } from "../src/types.js";
 
 function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
   return {

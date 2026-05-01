@@ -8,7 +8,7 @@ import {
   type ReviewInactiveState,
   type ReviewState,
   type ReviewStateStart,
-} from "./types";
+} from "./types.js";
 
 export { REVIEW_STATE_ENTRY_TYPE };
 
@@ -224,11 +224,7 @@ export function createReviewStateManager(
         getEntries: () => unknown[];
       };
     }): void {
-      state = getLatestReviewState({
-        sessionManager: {
-          getEntries: () => ctx.sessionManager.getEntries(),
-        },
-      });
+      state = getLatestReviewState(ctx);
       syncTools(state);
     },
   };

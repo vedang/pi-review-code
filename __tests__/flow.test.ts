@@ -9,8 +9,8 @@ import {
   REVIEW_SUMMARY_ENTRY_TYPE,
   buildReviewBranchSummary,
   createReviewFlowController,
-} from "../src/flow";
-import type { ResolvedReviewTarget, ReviewComment } from "../src/types";
+} from "../src/flow.js";
+import type { ResolvedReviewTarget, ReviewComment } from "../src/types.js";
 
 function promptTarget(): ResolvedReviewTarget {
   return {

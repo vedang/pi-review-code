@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveReviewTarget } from "../src/targets";
-import type { ExecCommand } from "../src/types";
+import { resolveReviewTarget } from "../src/targets.js";
+import type { ExecCommand } from "../src/types.js";
 
 function fakeExec(responses: Record<string, string>): ExecCommand {
   return async (command, args) => {

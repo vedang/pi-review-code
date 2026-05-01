@@ -8,8 +8,8 @@ import {
   REVIEW_SUMMARY_ENTRY_TYPE,
   type ReviewBranchSummaryDetails,
   type ReviewPromptMessageDetails,
-} from "./flow";
-import type { AddReviewCommentReference, ReviewComment } from "./types";
+} from "./flow.js";
+import type { AddReviewCommentReference, ReviewComment } from "./types.js";
 
 type ReviewMessageRenderer = Parameters<
   ExtensionAPI["registerMessageRenderer"]
@@ -180,11 +180,11 @@ function formatComments(
   return lines;
 }
 
-export const renderReviewPromptMessage: ReviewMessageRenderer = (
-  message,
-  { expanded },
-  theme,
-) => {
+export function renderReviewPromptMessage(
+  message: Parameters<ReviewMessageRenderer>[0],
+  { expanded }: Parameters<ReviewMessageRenderer>[1],
+  theme: Theme,
+): ReturnType<ReviewMessageRenderer> {
   const details = message.details;
   if (!isPromptDetails(details)) {
     return renderMessageBox(readTextContent(message.content), theme);
@@ -213,13 +213,13 @@ export const renderReviewPromptMessage: ReviewMessageRenderer = (
 
   lines.push("", prompt);
   return renderMessageBox(lines.join("\n"), theme);
-};
+}
 
-export const renderReviewSummaryMessage: ReviewMessageRenderer = (
-  message,
-  { expanded },
-  theme,
-) => {
+export function renderReviewSummaryMessage(
+  message: Parameters<ReviewMessageRenderer>[0],
+  { expanded }: Parameters<ReviewMessageRenderer>[1],
+  theme: Theme,
+): ReturnType<ReviewMessageRenderer> {
   const details = message.details;
   if (!isReviewSummaryDetails(details)) {
     return renderMessageBox(readTextContent(message.content), theme);
@@ -237,13 +237,13 @@ export const renderReviewSummaryMessage: ReviewMessageRenderer = (
   }
 
   return renderMessageBox(lines.join("\n"), theme);
-};
+}
 
-export const renderReviewFixSummaryMessage: ReviewMessageRenderer = (
-  message,
-  { expanded },
-  theme,
-) => {
+export function renderReviewFixSummaryMessage(
+  message: Parameters<ReviewMessageRenderer>[0],
+  { expanded }: Parameters<ReviewMessageRenderer>[1],
+  theme: Theme,
+): ReturnType<ReviewMessageRenderer> {
   const details = message.details;
   if (!isFixSummaryDetails(details)) {
     return renderMessageBox(readTextContent(message.content), theme);
@@ -266,7 +266,7 @@ export const renderReviewFixSummaryMessage: ReviewMessageRenderer = (
   }
 
   return renderMessageBox(lines.join("\n"), theme);
-};
+}
 
 export function registerReviewMessageRenderers(
   pi: Pick<ExtensionAPI, "registerMessageRenderer">,

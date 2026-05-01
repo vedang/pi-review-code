@@ -2,7 +2,7 @@ import type {
   CommandInvocation,
   GitLabMrSelector,
   ResolvedGitLabMrMetadata,
-} from "./types";
+} from "./types.js";
 
 function trimOptional(value: string | undefined): string {
   return value?.trim() ?? "";
@@ -116,6 +116,19 @@ function normalizeGitLabNoteEntry(raw: unknown): string | undefined {
   return `note by ${author || "unknown"}: ${body}`;
 }
 
+function normalizeMergeRequestNumber(value: unknown): number {
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? value : 0;
+  }
+
+  if (typeof value === "string") {
+    const number = Number(value);
+    return Number.isInteger(number) ? number : 0;
+  }
+
+  return 0;
+}
+
 export function normalizeGitLabMrView(raw: string): ResolvedGitLabMrMetadata {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
 
@@ -134,17 +147,9 @@ export function normalizeGitLabMrView(raw: string): ResolvedGitLabMrMetadata {
     .map(normalizeGitLabNoteEntry)
     .filter((note) => note !== undefined);
 
-  const rawNumber = parsed.iid;
-  const number =
-    typeof rawNumber === "number"
-      ? rawNumber
-      : typeof rawNumber === "string"
-        ? Number(rawNumber)
-        : 0;
-
   return {
     provider: "gitlab",
-    number: Number.isInteger(number) ? number : 0,
+    number: normalizeMergeRequestNumber(parsed.iid),
     title: asString((parsed as { title?: unknown }).title),
     body: asString((parsed as { description?: unknown }).description),
     url: asString((parsed as { web_url?: unknown }).web_url),

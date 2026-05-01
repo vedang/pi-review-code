@@ -5,13 +5,13 @@ import type {
   SessionBeforeTreeEvent,
 } from "@mariozechner/pi-coding-agent";
 
-import { parseReviewArgs, parseReviewFixArgs } from "./command";
+import { parseReviewArgs, parseReviewFixArgs } from "./command.js";
 import type {
   PiReviewThinkingLevel,
   ReviewPromptDraftGenerationResult,
-} from "./draft";
-import { buildReviewFixPrompt } from "./prompts";
-import type { ReviewPromptDraftRequest } from "./prompts";
+} from "./draft.js";
+import { buildReviewFixPrompt } from "./prompts.js";
+import type { ReviewPromptDraftRequest } from "./prompts.js";
 import {
   type AddReviewCommentReference,
   REVIEW_COMMENT_PRIORITIES,
@@ -21,7 +21,7 @@ import {
   type ReviewFixRunInfo,
   type ReviewFixSelector,
   type ReviewTarget,
-} from "./types";
+} from "./types.js";
 
 export const REVIEW_ANCHOR_MESSAGE_TYPE = "pi-review-code:anchor";
 export const REVIEW_PROMPT_ENTRY_TYPE = "pi-review-code:prompt";
@@ -104,6 +104,10 @@ export type ReviewSessionBeforeTreeResult = {
     details: ReviewBranchSummaryDetails | FixBranchSummaryDetails;
   };
 };
+
+const REVIEW_COMMENT_PRIORITY_SET = new Set<ReviewComment["priority"]>(
+  REVIEW_COMMENT_PRIORITIES,
+);
 
 function formatReference(reference: {
   filePath: string;
@@ -237,7 +241,7 @@ function extractAssistantSummary(event: unknown): string {
 function isValidPriority(value: unknown): value is ReviewComment["priority"] {
   return (
     typeof value === "string" &&
-    new Set(REVIEW_COMMENT_PRIORITIES).has(value as ReviewComment["priority"])
+    REVIEW_COMMENT_PRIORITY_SET.has(value as ReviewComment["priority"])
   );
 }
 

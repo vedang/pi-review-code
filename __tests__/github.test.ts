@@ -6,7 +6,7 @@ import {
   buildGitHubPrViewCommand,
   normalizeGitHubPrView,
   parseGitHubPrSelector,
-} from "../src/github";
+} from "../src/github.js";
 
 test("parseGitHubPrSelector parses GitHub pull request URLs", () => {
   assert.deepEqual(

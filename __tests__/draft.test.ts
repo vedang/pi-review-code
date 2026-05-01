@@ -4,8 +4,8 @@ import test from "node:test";
 import {
   completeReviewPromptDraftWithPiAi,
   generateReviewPromptDraft,
-} from "../src/draft";
-import type { ReviewPromptDraftRequest } from "../src/prompts";
+} from "../src/draft.js";
+import type { ReviewPromptDraftRequest } from "../src/prompts.js";
 
 const request: ReviewPromptDraftRequest = {
   systemPrompt: "system",

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildReviewPromptDraftRequest } from "../src/prompts";
-import type { ResolvedReviewTarget } from "../src/types";
+import { buildReviewPromptDraftRequest } from "../src/prompts.js";
+import type { ResolvedReviewTarget } from "../src/types.js";
 
 function diffTarget(): ResolvedReviewTarget {
   return {

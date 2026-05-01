@@ -8,7 +8,7 @@ import {
   buildGitDiffStatCommand,
   normalizeGitFileList,
   validateGitRef,
-} from "../src/git";
+} from "../src/git.js";
 
 test("validateGitRef accepts ordinary branch refs and change ids", () => {
   assert.equal(validateGitRef("origin/main").ok, true);

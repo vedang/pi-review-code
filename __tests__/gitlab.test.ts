@@ -6,7 +6,7 @@ import {
   buildGitLabMrViewCommand,
   normalizeGitLabMrView,
   parseGitLabMrSelector,
-} from "../src/gitlab";
+} from "../src/gitlab.js";
 
 test("parseGitLabMrSelector parses hosted GitLab merge request URLs", () => {
   assert.deepEqual(

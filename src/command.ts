@@ -3,7 +3,7 @@ import type {
   ReviewFixCommand,
   ReviewFixSelector,
   ReviewTarget,
-} from "./types";
+} from "./types.js";
 
 export const REVIEW_USAGE = [
   "Usage:",

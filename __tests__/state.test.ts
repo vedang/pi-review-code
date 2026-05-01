@@ -6,7 +6,7 @@ import {
   createInactiveReviewState,
   createReviewStateManager,
   getLatestReviewState,
-} from "../src/state";
+} from "../src/state.js";
 
 test("createInactiveReviewState returns versioned inactive state", () => {
   assert.deepEqual(createInactiveReviewState(), {

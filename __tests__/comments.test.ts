@@ -6,7 +6,7 @@ import {
   getReviewCommentsForRun,
   normalizeAddReviewCommentInput,
   registerAddReviewCommentTool,
-} from "../src/comments";
+} from "../src/comments.js";
 
 type ToolExecute = (
   toolCallId: string,

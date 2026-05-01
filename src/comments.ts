@@ -8,7 +8,7 @@ import {
   REVIEW_STATE_VERSION,
   type ReviewComment,
   type ReviewCommentPriority,
-} from "./types";
+} from "./types.js";
 
 export { REVIEW_COMMENT_ENTRY_TYPE };
 

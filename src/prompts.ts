@@ -5,7 +5,7 @@ import type {
   ResolvedReviewTarget,
   ReviewComment,
   ReviewTargetCommandHint,
-} from "./types";
+} from "./types.js";
 
 export type ReviewPromptDraftRequest = {
   systemPrompt: string;

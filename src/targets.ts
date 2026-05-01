@@ -6,7 +6,7 @@ import type {
   ResolvedReviewTarget,
   ReviewTarget,
   ReviewTargetCommandHint,
-} from "./types";
+} from "./types.js";
 
 import {
   buildGitDiffCommand,
@@ -15,19 +15,19 @@ import {
   buildGitDiffStatCommand,
   normalizeGitFileList,
   validateGitRef,
-} from "./git";
+} from "./git.js";
 import {
   buildGitHubPrDiffCommand,
   buildGitHubPrViewCommand,
   normalizeGitHubPrView,
   parseGitHubPrSelector,
-} from "./github";
+} from "./github.js";
 import {
   buildGitLabMrDiffCommand,
   buildGitLabMrViewCommand,
   normalizeGitLabMrView,
   parseGitLabMrSelector,
-} from "./gitlab";
+} from "./gitlab.js";
 
 function commandHint(
   label: string,
@@ -68,7 +68,6 @@ export async function resolveReviewTarget(
     const files = normalizeGitFileList(getStdout(listResult));
     const diffStat = getStdout(statResult).trim();
 
-    const listFilesCommand = buildGitDiffNameOnlyCommand(ref);
     const showDiffCommand = buildGitDiffCommand(ref);
     const showFileDiffCommand = buildGitDiffForFileCommand(ref, "<file>");
 
@@ -81,8 +80,8 @@ export async function resolveReviewTarget(
       commandHints: [
         commandHint(
           "List changed files",
-          listFilesCommand.command,
-          listFilesCommand.args,
+          listCommand.command,
+          listCommand.args,
         ),
         commandHint(
           "Show full diff",

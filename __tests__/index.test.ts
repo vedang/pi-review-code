@@ -10,8 +10,8 @@ import type {
 import reviewCodeExtension, {
   REVIEW_FIX_HELP_TEXT,
   REVIEW_HELP_TEXT,
-} from "../src/index";
-import { REVIEW_STATE_ENTRY_TYPE } from "../src/state";
+} from "../src/index.js";
+import { REVIEW_STATE_ENTRY_TYPE } from "../src/state.js";
 
 type Harness = ReturnType<typeof createHarness>;
 type RuntimeHarness = ReturnType<typeof createRuntimeHarness>;

@@ -8,9 +8,9 @@ import {
   REVIEW_SUMMARY_ENTRY_TYPE,
   type ReviewBranchSummaryDetails,
   type ReviewPromptMessageDetails,
-} from "../src/flow";
-import { registerReviewMessageRenderers } from "../src/renderers";
-import type { ReviewComment } from "../src/types";
+} from "../src/flow.js";
+import { registerReviewMessageRenderers } from "../src/renderers.js";
+import type { ReviewComment } from "../src/types.js";
 
 const theme = {
   bg: (_name: string, text: string) => text,

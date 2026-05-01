@@ -6,17 +6,17 @@ import type {
 import {
   getReviewCommentsForRun,
   registerAddReviewCommentTool,
-} from "./comments";
+} from "./comments.js";
 import {
   type PiReviewThinkingLevel,
   completeReviewPromptDraftWithPiAi,
   generateReviewPromptDraft,
-} from "./draft";
-import { createReviewFlowController } from "./flow";
-import { buildReviewPromptDraftRequest } from "./prompts";
-import { registerReviewMessageRenderers } from "./renderers";
-import { type ReviewStateManager, createReviewStateManager } from "./state";
-import { resolveReviewTarget } from "./targets";
+} from "./draft.js";
+import { createReviewFlowController } from "./flow.js";
+import { buildReviewPromptDraftRequest } from "./prompts.js";
+import { registerReviewMessageRenderers } from "./renderers.js";
+import { type ReviewStateManager, createReviewStateManager } from "./state.js";
+import { resolveReviewTarget } from "./targets.js";
 
 export const REVIEW_HELP_TEXT = [
   "pi-review-code review flow is installed.",

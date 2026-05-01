@@ -2,7 +2,7 @@ import type {
   CommandInvocation,
   GitHubPrSelector,
   ResolvedGitHubPrMetadata,
-} from "./types";
+} from "./types.js";
 
 function trimOptional(value: string | undefined): string {
   return value?.trim() ?? "";
