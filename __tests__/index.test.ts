@@ -156,45 +156,24 @@ test("extension registers review commands and message renderers", () => {
   assert.ok(harness.messageRenderers.has("pi-review-code:review-fix-summary"));
 });
 
-test("/review shows scaffold help", async () => {
-  const harness = createHarness();
+const scaffoldHelpCases = [
+  ["review", REVIEW_HELP_TEXT],
+  ["review-diff-against", REVIEW_HELP_TEXT],
+  ["review-pr", REVIEW_HELP_TEXT],
+  ["review-fix", REVIEW_FIX_HELP_TEXT],
+] as const;
 
-  await runCommand(harness, "review");
+for (const [commandName, expectedHelp] of scaffoldHelpCases) {
+  test(`/${commandName} shows scaffold help without runtime support`, async () => {
+    const harness = createHarness();
 
-  assert.deepEqual(harness.notifications, [
-    { message: REVIEW_HELP_TEXT, level: "info" },
-  ]);
-});
+    await runCommand(harness, commandName);
 
-test("/review-diff-against shows scaffold help without runtime support", async () => {
-  const harness = createHarness();
-
-  await runCommand(harness, "review-diff-against");
-
-  assert.deepEqual(harness.notifications, [
-    { message: REVIEW_HELP_TEXT, level: "info" },
-  ]);
-});
-
-test("/review-pr shows scaffold help without runtime support", async () => {
-  const harness = createHarness();
-
-  await runCommand(harness, "review-pr");
-
-  assert.deepEqual(harness.notifications, [
-    { message: REVIEW_HELP_TEXT, level: "info" },
-  ]);
-});
-
-test("/review-fix shows scaffold help", async () => {
-  const harness = createHarness();
-
-  await runCommand(harness, "review-fix");
-
-  assert.deepEqual(harness.notifications, [
-    { message: REVIEW_FIX_HELP_TEXT, level: "info" },
-  ]);
-});
+    assert.deepEqual(harness.notifications, [
+      { message: expectedHelp, level: "info" },
+    ]);
+  });
+}
 
 test("extension abandons persisted active review state on session_start", async () => {
   const harness = createRuntimeHarness();

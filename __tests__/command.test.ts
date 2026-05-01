@@ -12,155 +12,107 @@ import {
   parseReviewPrArgs,
 } from "../src/command.js";
 
-test("parses /review free-form request as prompt target", () => {
-  assert.deepEqual(
-    parseReviewArgs(
+function reviewPromptCommand(prompt: string) {
+  return {
+    kind: "review",
+    target: { kind: "prompt", prompt, targetHint: prompt },
+  };
+}
+
+function reviewDiffCommand(ref: string) {
+  return {
+    kind: "review",
+    target: { kind: "diff-against", ref, targetHint: ref },
+  };
+}
+
+function reviewPrCommand(selector: string) {
+  return {
+    kind: "review",
+    target: { kind: "pr", selector, targetHint: selector },
+  };
+}
+
+test("parses /review free-form requests as prompt targets", () => {
+  const cases = [
+    [
       "review the database schema and ensure column names are sensible",
-    ),
-    {
-      kind: "review",
-      target: {
-        kind: "prompt",
-        prompt:
-          "review the database schema and ensure column names are sensible",
-        targetHint:
-          "review the database schema and ensure column names are sensible",
-      },
-    },
-  );
-});
+      "review the database schema and ensure column names are sensible",
+    ],
+    [
+      'review "database schema" and "column names"',
+      "review database schema and column names",
+    ],
+    ["diff-against origin/main", "diff-against origin/main"],
+    [
+      "pr https://github.com/owner/repo/pull/1",
+      "pr https://github.com/owner/repo/pull/1",
+    ],
+  ] as const;
 
-test("parses quoted words inside /review free-form text", () => {
-  assert.deepEqual(
-    parseReviewArgs('review "database schema" and "column names"'),
-    {
-      kind: "review",
-      target: {
-        kind: "prompt",
-        prompt: "review database schema and column names",
-        targetHint: "review database schema and column names",
-      },
-    },
-  );
-});
-
-test("treats old /review subcommands as free-form prompt text", () => {
-  assert.deepEqual(parseReviewArgs("diff-against origin/main"), {
-    kind: "review",
-    target: {
-      kind: "prompt",
-      prompt: "diff-against origin/main",
-      targetHint: "diff-against origin/main",
-    },
-  });
-  assert.deepEqual(parseReviewArgs("pr https://github.com/owner/repo/pull/1"), {
-    kind: "review",
-    target: {
-      kind: "prompt",
-      prompt: "pr https://github.com/owner/repo/pull/1",
-      targetHint: "pr https://github.com/owner/repo/pull/1",
-    },
-  });
+  for (const [input, expectedPrompt] of cases) {
+    assert.deepEqual(
+      parseReviewArgs(input),
+      reviewPromptCommand(expectedPrompt),
+    );
+  }
 });
 
 test("rejects missing /review request with exact usage", () => {
   assert.throws(() => parseReviewArgs(""), new Error(REVIEW_USAGE));
 });
 
-test("parses /review-diff-against target", () => {
-  assert.deepEqual(parseReviewDiffAgainstArgs("origin/main"), {
-    kind: "review",
-    target: {
-      kind: "diff-against",
-      ref: "origin/main",
-      targetHint: "origin/main",
-    },
-  });
-});
-
-test("parses quoted /review-diff-against target", () => {
-  assert.deepEqual(parseReviewDiffAgainstArgs('"change id"'), {
-    kind: "review",
-    target: {
-      kind: "diff-against",
-      ref: "change id",
-      targetHint: "change id",
-    },
-  });
-});
-
-test("rejects missing /review-diff-against ref", () => {
-  assert.throws(
-    () => parseReviewDiffAgainstArgs(""),
-    new Error("/review-diff-against requires a ref or change id."),
-  );
-});
-
-test("rejects extra /review-diff-against args", () => {
-  assert.throws(
-    () => parseReviewDiffAgainstArgs("origin/main extra"),
-    new Error("/review-diff-against accepts exactly one ref or change id."),
-  );
-});
-
-test("rejects empty quoted /review-diff-against ref", () => {
-  assert.throws(
-    () => parseReviewDiffAgainstArgs('""'),
-    new Error("/review-diff-against requires a ref or change id."),
-  );
-});
-
-test("parses /review-pr target", () => {
-  assert.deepEqual(
-    parseReviewPrArgs("https://github.com/owner/repo/pull/123"),
-    {
-      kind: "review",
-      target: {
-        kind: "pr",
-        selector: "https://github.com/owner/repo/pull/123",
-        targetHint: "https://github.com/owner/repo/pull/123",
-      },
-    },
-  );
-});
-
-test("parses quoted /review-pr target", () => {
-  assert.deepEqual(parseReviewPrArgs('"group/project!42"'), {
-    kind: "review",
-    target: {
-      kind: "pr",
-      selector: "group/project!42",
-      targetHint: "group/project!42",
-    },
-  });
-});
-
-test("rejects missing /review-pr selector", () => {
-  assert.throws(
-    () => parseReviewPrArgs(""),
-    new Error(
+const singleTargetCommandCases = [
+  {
+    commandName: "review-diff-against",
+    parse: parseReviewDiffAgainstArgs,
+    validInput: "origin/main",
+    quotedInput: '"change id"',
+    validExpected: reviewDiffCommand("origin/main"),
+    quotedExpected: reviewDiffCommand("change id"),
+    missingMessage: "/review-diff-against requires a ref or change id.",
+    extraInput: "origin/main extra",
+    extraMessage: "/review-diff-against accepts exactly one ref or change id.",
+  },
+  {
+    commandName: "review-pr",
+    parse: parseReviewPrArgs,
+    validInput: "https://github.com/owner/repo/pull/123",
+    quotedInput: '"group/project!42"',
+    validExpected: reviewPrCommand("https://github.com/owner/repo/pull/123"),
+    quotedExpected: reviewPrCommand("group/project!42"),
+    missingMessage:
       "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
-    ),
-  );
-});
-
-test("rejects extra /review-pr args", () => {
-  assert.throws(
-    () => parseReviewPrArgs("123 extra"),
-    new Error(
+    extraInput: "123 extra",
+    extraMessage:
       "/review-pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
-    ),
-  );
-});
+  },
+] as const;
 
-test("rejects empty quoted /review-pr selector", () => {
-  assert.throws(
-    () => parseReviewPrArgs('""'),
-    new Error(
-      "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
-    ),
-  );
-});
+for (const testCase of singleTargetCommandCases) {
+  test(`parses /${testCase.commandName} target`, () => {
+    assert.deepEqual(
+      testCase.parse(testCase.validInput),
+      testCase.validExpected,
+    );
+    assert.deepEqual(
+      testCase.parse(testCase.quotedInput),
+      testCase.quotedExpected,
+    );
+  });
+
+  test(`rejects invalid /${testCase.commandName} args`, () => {
+    assert.throws(() => testCase.parse(""), new Error(testCase.missingMessage));
+    assert.throws(
+      () => testCase.parse(testCase.extraInput),
+      new Error(testCase.extraMessage),
+    );
+    assert.throws(
+      () => testCase.parse('""'),
+      new Error(testCase.missingMessage),
+    );
+  });
+}
 
 test("review-specific usage constants mention renamed commands", () => {
   assert.match(REVIEW_USAGE, /\/review <review request>/);
@@ -178,53 +130,39 @@ test("review-specific usage constants mention renamed commands", () => {
 });
 
 test("rejects unterminated quotes", () => {
-  assert.throws(
-    () => parseReviewArgs('review "unfinished'),
-    new Error("Unterminated quote in command arguments."),
-  );
-  assert.throws(
-    () => parseReviewDiffAgainstArgs('"unfinished'),
-    new Error("Unterminated quote in command arguments."),
-  );
-  assert.throws(
-    () => parseReviewPrArgs('"unfinished'),
-    new Error("Unterminated quote in command arguments."),
-  );
+  for (const parse of [
+    parseReviewArgs,
+    parseReviewDiffAgainstArgs,
+    parseReviewPrArgs,
+  ]) {
+    assert.throws(
+      () => parse('"unfinished'),
+      new Error("Unterminated quote in command arguments."),
+    );
+  }
 });
 
-test("parses default /review-fix selector as latest", () => {
+test("parses /review-fix selectors", () => {
   assert.deepEqual(parseReviewFixArgs(""), {
     kind: "review-fix",
     selector: { kind: "latest" },
   });
-});
-
-test("parses explicit latest /review-fix selector", () => {
   assert.deepEqual(parseReviewFixArgs("latest"), {
     kind: "review-fix",
     selector: { kind: "latest" },
   });
-});
-
-test("parses run-id /review-fix selector", () => {
   assert.deepEqual(parseReviewFixArgs("rev_20260501_abc"), {
     kind: "review-fix",
     selector: { kind: "run-id", runId: "rev_20260501_abc" },
   });
-});
-
-test("parses quoted run-id /review-fix selector", () => {
   assert.deepEqual(parseReviewFixArgs('"rev id"'), {
     kind: "review-fix",
     selector: { kind: "run-id", runId: "rev id" },
   });
 });
 
-test("rejects empty quoted /review-fix selector", () => {
+test("rejects invalid /review-fix selectors", () => {
   assert.throws(() => parseReviewFixArgs('""'), new Error(REVIEW_FIX_USAGE));
-});
-
-test("rejects too many /review-fix args", () => {
   assert.throws(
     () => parseReviewFixArgs("one two"),
     new Error(REVIEW_FIX_USAGE),

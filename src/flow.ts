@@ -752,77 +752,39 @@ export function createReviewFlowController(
     dependencies.pi.sendUserMessage(editedPrompt);
   }
 
-  async function handleReviewCommand(
-    args: string,
-    ctx: ExtensionCommandContext,
-  ) {
-    if (!ctx.hasUI) {
-      return;
-    }
+  type ReviewCommandParser = (args: string) => { target: ReviewTarget };
 
-    let command: ReturnType<typeof parseReviewArgs>;
-    try {
-      command = parseReviewArgs(args);
-    } catch (error) {
-      ctx.ui.notify(
-        error instanceof Error
-          ? error.message
-          : "Cannot start review: invalid command arguments.",
-        "error",
-      );
-      return;
-    }
+  function createReviewCommandHandler(parser: ReviewCommandParser) {
+    return async (
+      args: string,
+      ctx: ExtensionCommandContext,
+    ): Promise<void> => {
+      if (!ctx.hasUI) {
+        return;
+      }
 
-    await launchReview(command.target, ctx);
+      let command: { target: ReviewTarget };
+      try {
+        command = parser(args);
+      } catch (error) {
+        ctx.ui.notify(
+          error instanceof Error
+            ? error.message
+            : "Cannot start review: invalid command arguments.",
+          "error",
+        );
+        return;
+      }
+
+      await launchReview(command.target, ctx);
+    };
   }
 
-  async function handleReviewDiffAgainstCommand(
-    args: string,
-    ctx: ExtensionCommandContext,
-  ) {
-    if (!ctx.hasUI) {
-      return;
-    }
-
-    let command: ReturnType<typeof parseReviewDiffAgainstArgs>;
-    try {
-      command = parseReviewDiffAgainstArgs(args);
-    } catch (error) {
-      ctx.ui.notify(
-        error instanceof Error
-          ? error.message
-          : "Cannot start review: invalid command arguments.",
-        "error",
-      );
-      return;
-    }
-
-    await launchReview(command.target, ctx);
-  }
-
-  async function handleReviewPrCommand(
-    args: string,
-    ctx: ExtensionCommandContext,
-  ) {
-    if (!ctx.hasUI) {
-      return;
-    }
-
-    let command: ReturnType<typeof parseReviewPrArgs>;
-    try {
-      command = parseReviewPrArgs(args);
-    } catch (error) {
-      ctx.ui.notify(
-        error instanceof Error
-          ? error.message
-          : "Cannot start review: invalid command arguments.",
-        "error",
-      );
-      return;
-    }
-
-    await launchReview(command.target, ctx);
-  }
+  const handleReviewCommand = createReviewCommandHandler(parseReviewArgs);
+  const handleReviewDiffAgainstCommand = createReviewCommandHandler(
+    parseReviewDiffAgainstArgs,
+  );
+  const handleReviewPrCommand = createReviewCommandHandler(parseReviewPrArgs);
 
   async function startFixRunIfSupported(
     ctx: ExtensionCommandContext,
@@ -843,6 +805,7 @@ export function createReviewFlowController(
       originThinkingLevel: runInfo.originThinkingLevel,
     });
   }
+
   async function handleReviewFixCommand(
     args: string,
     ctx: ExtensionCommandContext,

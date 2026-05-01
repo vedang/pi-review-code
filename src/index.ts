@@ -100,6 +100,41 @@ function registerInfoCommand(
   });
 }
 
+type ReviewCommandDefinition = {
+  name: "review-fix" | "review" | "review-diff-against" | "review-pr";
+  description: string;
+  helpText: string;
+  hasEmptyArgsHelp?: boolean;
+};
+
+type ReviewRuntimeCommandDefinition = ReviewCommandDefinition & {
+  runtimeHandler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
+};
+
+const REVIEW_COMMANDS = {
+  reviewFix: {
+    name: "review-fix",
+    description: "Fix findings from a recent pi-review-code run",
+    helpText: REVIEW_FIX_HELP_TEXT,
+  },
+  review: {
+    name: "review",
+    description: "Start a context-rich code review",
+    helpText: REVIEW_HELP_TEXT,
+    hasEmptyArgsHelp: true,
+  },
+  reviewDiffAgainst: {
+    name: "review-diff-against",
+    description: "Start a context-rich code review from local diff",
+    helpText: REVIEW_HELP_TEXT,
+  },
+  reviewPr: {
+    name: "review-pr",
+    description: "Start a context-rich code review from a PR",
+    helpText: REVIEW_HELP_TEXT,
+  },
+} as const satisfies Record<string, ReviewCommandDefinition>;
+
 export default function reviewCodeExtension(pi: ExtensionAPI): void {
   if (isReviewRendererRuntime(pi)) {
     registerReviewMessageRenderers(pi);
@@ -108,30 +143,14 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
   const stateManager = registerReviewRuntimeHelpers(pi);
 
   if (stateManager === null) {
-    registerInfoCommand(
-      pi,
-      "review-fix",
-      "Fix findings from a recent pi-review-code run",
-      REVIEW_FIX_HELP_TEXT,
-    );
-    registerInfoCommand(
-      pi,
-      "review",
-      "Start a context-rich code review",
-      REVIEW_HELP_TEXT,
-    );
-    registerInfoCommand(
-      pi,
-      "review-diff-against",
-      "Start a context-rich code review from local diff",
-      REVIEW_HELP_TEXT,
-    );
-    registerInfoCommand(
-      pi,
-      "review-pr",
-      "Start a context-rich code review from a PR",
-      REVIEW_HELP_TEXT,
-    );
+    for (const command of Object.values(REVIEW_COMMANDS)) {
+      registerInfoCommand(
+        pi,
+        command.name,
+        command.description,
+        command.helpText,
+      );
+    }
     return;
   }
 
@@ -204,52 +223,43 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
     controller.handleSessionBeforeTree(event),
   );
 
-  pi.registerCommand("review-fix", {
-    description: "Fix findings from a recent pi-review-code run",
-    handler: async (args, ctx) => {
-      if (!ctx.hasUI) {
-        return;
-      }
-
-      await controller.handleReviewFixCommand(args, ctx);
+  const runtimeReviewCommands: ReviewRuntimeCommandDefinition[] = [
+    {
+      ...REVIEW_COMMANDS.reviewFix,
+      runtimeHandler: (args, ctx) =>
+        controller.handleReviewFixCommand(args, ctx),
     },
-  });
-
-  pi.registerCommand("review", {
-    description: "Start a context-rich code review",
-    handler: async (args, ctx) => {
-      if (!ctx.hasUI) {
-        return;
-      }
-
-      if (args.trim().length === 0) {
-        ctx.ui.notify(REVIEW_HELP_TEXT, "info");
-        return;
-      }
-
-      await controller.handleReviewCommand(args, ctx);
+    {
+      ...REVIEW_COMMANDS.review,
+      runtimeHandler: (args, ctx) => controller.handleReviewCommand(args, ctx),
     },
-  });
-
-  pi.registerCommand("review-diff-against", {
-    description: "Start a context-rich code review from local diff",
-    handler: async (args, ctx) => {
-      if (!ctx.hasUI) {
-        return;
-      }
-
-      await controller.handleReviewDiffAgainstCommand(args, ctx);
+    {
+      ...REVIEW_COMMANDS.reviewDiffAgainst,
+      runtimeHandler: (args, ctx) =>
+        controller.handleReviewDiffAgainstCommand(args, ctx),
     },
-  });
-
-  pi.registerCommand("review-pr", {
-    description: "Start a context-rich code review from a PR",
-    handler: async (args, ctx) => {
-      if (!ctx.hasUI) {
-        return;
-      }
-
-      await controller.handleReviewPrCommand(args, ctx);
+    {
+      ...REVIEW_COMMANDS.reviewPr,
+      runtimeHandler: (args, ctx) =>
+        controller.handleReviewPrCommand(args, ctx),
     },
-  });
+  ];
+
+  for (const command of runtimeReviewCommands) {
+    pi.registerCommand(command.name, {
+      description: command.description,
+      handler: async (args, ctx) => {
+        if (!ctx.hasUI) {
+          return;
+        }
+
+        if (command.hasEmptyArgsHelp && args.trim().length === 0) {
+          ctx.ui.notify(command.helpText, "info");
+          return;
+        }
+
+        await command.runtimeHandler(args, ctx);
+      },
+    });
+  }
 }
