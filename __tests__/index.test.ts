@@ -57,10 +57,17 @@ function createRuntimeHarness() {
   const events = new Map<string, RegisteredEventHandler>();
   const registeredTools: unknown[] = [];
   const setActiveToolsCalls: string[][] = [];
-  let activeTools = ["read", "bash"];
+  const appended: Array<{ customType: string; data: unknown }> = [];
+  const notifications: Array<{ message: string; level: string }> = [];
+  let activeTools = ["read", "bash", "add_review_comment"];
 
   const ctx = {
     hasUI: true,
+    ui: {
+      notify: (message: string, level: string) => {
+        notifications.push({ message, level });
+      },
+    },
     sessionManager: {
       getEntries: () => [
         {
@@ -98,7 +105,9 @@ function createRuntimeHarness() {
     registerTool: (tool: unknown) => {
       registeredTools.push(tool);
     },
-    appendEntry: () => {},
+    appendEntry: (customType: string, data: unknown) => {
+      appended.push({ customType, data });
+    },
     getActiveTools: () => activeTools,
     setActiveTools: (toolNames: string[]) => {
       setActiveToolsCalls.push(toolNames);
@@ -118,6 +127,8 @@ function createRuntimeHarness() {
     messageRenderers,
     registeredTools,
     setActiveToolsCalls,
+    appended,
+    notifications,
     ctx,
   };
 }
@@ -163,7 +174,7 @@ test("/review-fix shows scaffold help", async () => {
   ]);
 });
 
-test("extension refreshes persisted active review state on session_start", async () => {
+test("extension abandons persisted active review state on session_start", async () => {
   const harness = createRuntimeHarness();
   const handler = harness.events.get("session_start");
 
@@ -172,7 +183,18 @@ test("extension refreshes persisted active review state on session_start", async
 
   await handler({ type: "session_start", reason: "reload" }, harness.ctx);
 
-  assert.deepEqual(harness.setActiveToolsCalls, [
-    ["read", "bash", "add_review_comment"],
+  assert.deepEqual(harness.setActiveToolsCalls, [["read", "bash"]]);
+  assert.deepEqual(harness.appended, [
+    {
+      customType: REVIEW_STATE_ENTRY_TYPE,
+      data: { version: 1, activeKind: null },
+    },
+  ]);
+  assert.deepEqual(harness.notifications, [
+    {
+      message:
+        "Abandoned persisted pi-review-code review review-1 after extension reload; start /review again.",
+      level: "warning",
+    },
   ]);
 });

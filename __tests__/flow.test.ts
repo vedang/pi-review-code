@@ -66,6 +66,7 @@ function createHarness(options: HarnessOptions = {}) {
   const editorInputs: Array<{ title: string; initialValue: string }> = [];
   const resolvedTargets: unknown[] = [];
   const draftRequests: unknown[] = [];
+  const draftOptions: unknown[] = [];
 
   const target = options.target ?? promptTarget();
   const draftOk = options.draftOk ?? true;
@@ -113,8 +114,9 @@ function createHarness(options: HarnessOptions = {}) {
       resolvedTargets.push(reviewTarget);
       return target;
     },
-    buildDraftRequest: (resolvedTarget) => {
+    buildDraftRequest: (resolvedTarget, options) => {
       draftRequests.push(resolvedTarget);
+      draftOptions.push(options);
       return { systemPrompt: "system", userPrompt: "packet" };
     },
     generateDraft: async (request) => {
@@ -184,6 +186,7 @@ function createHarness(options: HarnessOptions = {}) {
     editorInputs,
     resolvedTargets,
     draftRequests,
+    draftOptions,
   };
 }
 
@@ -315,6 +318,35 @@ test("review flow launches PR review after resolving PR metadata", async () => {
       originModelId: "claude-sonnet",
       originThinkingLevel: "high",
     },
+  ]);
+});
+
+test("review flow passes resolved diff text to prompt draft builder", async () => {
+  const target: ResolvedReviewTarget = {
+    kind: "diff-against",
+    targetHint: "origin/main",
+    ref: "origin/main",
+    files: ["src/auth.ts"],
+    diffStat: "1 file changed",
+    diffText: "diff --git a/src/auth.ts b/src/auth.ts\n+rotateToken();",
+    commandHints: [
+      {
+        label: "Show full diff",
+        command: "git",
+        args: ["--no-pager", "diff", "origin/main"],
+      },
+    ],
+  };
+  const harness = createHarness({ editorResult: "Edited prompt", target });
+
+  await harness.controller.handleReviewCommand(
+    "diff-against origin/main",
+    harness.ctx,
+  );
+
+  assert.deepEqual(harness.draftRequests, [target]);
+  assert.deepEqual(harness.draftOptions, [
+    { diffText: "diff --git a/src/auth.ts b/src/auth.ts\n+rotateToken();" },
   ]);
 });
 

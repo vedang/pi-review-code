@@ -11,7 +11,10 @@ import type {
   ReviewPromptDraftGenerationResult,
 } from "./draft.js";
 import { buildReviewFixPrompt } from "./prompts.js";
-import type { ReviewPromptDraftRequest } from "./prompts.js";
+import type {
+  ReviewPromptDraftOptions,
+  ReviewPromptDraftRequest,
+} from "./prompts.js";
 import {
   type AddReviewCommentReference,
   REVIEW_COMMENT_PRIORITIES,
@@ -494,7 +497,10 @@ type ReviewFlowDependencies = {
   pi: ReviewFlowRuntime;
   stateManager: ReviewFlowStateManager;
   resolveTarget: ResolveTarget;
-  buildDraftRequest: (target: ResolvedReviewTarget) => ReviewPromptDraftRequest;
+  buildDraftRequest: (
+    target: ResolvedReviewTarget,
+    options?: ReviewPromptDraftOptions,
+  ) => ReviewPromptDraftRequest;
   generateDraft: GenerateDraft;
   getCommentsForRun: GetCommentsForRun;
   getThinkingLevel: () => PiReviewThinkingLevel;
@@ -693,7 +699,16 @@ export function createReviewFlowController(
     }
 
     const thinkingLevel = dependencies.getThinkingLevel();
-    const draftRequest = dependencies.buildDraftRequest(resolvedTarget);
+    const draftOptions =
+      resolvedTarget.kind === "diff-against" &&
+      resolvedTarget.diffText !== undefined
+        ? { diffText: resolvedTarget.diffText }
+        : undefined;
+
+    const draftRequest = dependencies.buildDraftRequest(
+      resolvedTarget,
+      draftOptions,
+    );
     ctx.ui.notify("Generating review prompt draft…", "info");
 
     const draft = await dependencies.generateDraft(draftRequest, {

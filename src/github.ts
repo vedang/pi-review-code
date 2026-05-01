@@ -21,6 +21,24 @@ function isWebUrl(url: URL): boolean {
   return url.protocol === "https:" || url.protocol === "http:";
 }
 
+function normalizeSelectorUrl(rawSelector: string): URL {
+  const url = new URL(rawSelector);
+  if (!isWebUrl(url)) {
+    throw new Error("Unsupported URL scheme");
+  }
+
+  if (url.search.length > 0 || url.hash.length > 0) {
+    throw new Error("Unsupported URL query or fragment");
+  }
+
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url;
+}
+
+function buildGitHubSelectorValue(url: URL): string {
+  return `${url.protocol}//${url.host}${url.pathname}`;
+}
+
 function buildAuthorLogin(value: unknown): string {
   if (typeof value !== "object" || value === null) {
     return "";
@@ -49,12 +67,15 @@ export function parseGitHubPrSelector(
   }
 
   try {
-    const url = new URL(trimmed);
-    if (!isWebUrl(url) || url.hostname !== "github.com") {
+    const selectorUrl = normalizeSelectorUrl(trimmed);
+
+    if (selectorUrl.hostname !== "github.com") {
       return undefined;
     }
 
-    const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/);
+    const match = selectorUrl.pathname.match(
+      /^\/([^/]+)\/([^/]+)\/pull\/(\d+)$/,
+    );
     if (match === null) {
       return undefined;
     }
@@ -69,7 +90,7 @@ export function parseGitHubPrSelector(
 
     return {
       kind: "github",
-      selector: trimmed,
+      selector: buildGitHubSelectorValue(selectorUrl),
       owner,
       repo,
       number,

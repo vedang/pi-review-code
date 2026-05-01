@@ -21,8 +21,24 @@ const REVIEW_PRIORITIES = ["P0", "P1", "P2", "P3"] as const;
 
 const DEFAULT_MAX_EMBEDDED_DIFF_CHARS = 8000;
 
+const SIMPLE_TOKEN_PATTERN = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+function isSafeCommandToken(token: string): boolean {
+  return SIMPLE_TOKEN_PATTERN.test(token);
+}
+
+function shellQuoteArg(token: string): string {
+  if (token.length > 0 && isSafeCommandToken(token)) {
+    return token;
+  }
+
+  return `'${token.replace(/'/g, "'\\''")}'`;
+}
+
 function formatCommandHint(commandHint: ReviewTargetCommandHint): string {
-  const command = [commandHint.command, ...commandHint.args].join(" ");
+  const command = [commandHint.command, ...commandHint.args]
+    .map(shellQuoteArg)
+    .join(" ");
   return `\`${command}\``;
 }
 

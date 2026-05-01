@@ -21,6 +21,24 @@ function isWebUrl(url: URL): boolean {
   return url.protocol === "https:" || url.protocol === "http:";
 }
 
+function normalizeSelectorUrl(rawSelector: string): URL {
+  const url = new URL(rawSelector);
+  if (!isWebUrl(url)) {
+    throw new Error("Unsupported URL scheme");
+  }
+
+  if (url.search.length > 0 || url.hash.length > 0) {
+    throw new Error("Unsupported URL query or fragment");
+  }
+
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url;
+}
+
+function buildGitLabSelectorValue(url: URL): string {
+  return `${url.protocol}//${url.host}${url.pathname}`;
+}
+
 function buildAuthorUsername(value: unknown): string {
   if (typeof value !== "object" || value === null) {
     return "";
@@ -40,18 +58,16 @@ export function parseGitLabMrSelector(
   const trimmed = selector.trim();
 
   try {
-    const url = new URL(trimmed);
+    const selectorUrl = normalizeSelectorUrl(trimmed);
 
-    if (!isWebUrl(url)) {
-      return undefined;
-    }
-
-    const match = url.pathname.match(/^\/(.+)\/-\/merge_requests\/(\d+)\/?$/);
+    const match = selectorUrl.pathname.match(
+      /^\/(.+)\/-\/merge_requests\/(\d+)$/,
+    );
     if (match === null) {
       return undefined;
     }
 
-    const host = url.hostname;
+    const host = selectorUrl.hostname;
     const projectPath = trimOptional(decodeURIComponent(match[1] ?? ""));
     const number = parsePositiveSafeInteger(match[2] ?? "");
 
@@ -61,7 +77,7 @@ export function parseGitLabMrSelector(
 
     return {
       kind: "gitlab",
-      selector: trimmed,
+      selector: buildGitLabSelectorValue(selectorUrl),
       host,
       projectPath,
       number,

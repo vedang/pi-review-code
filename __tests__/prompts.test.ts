@@ -46,6 +46,10 @@ test("buildReviewPromptDraftRequest embeds small diffs with rubric and tool inst
     request.userPrompt,
     /`git --no-pager diff origin\/main --name-only`/,
   );
+  assert.match(
+    request.userPrompt,
+    /`git --no-pager diff origin\/main -- '<file>'`/,
+  );
   assert.match(request.userPrompt, /diff --git a\/src\/auth\.ts/);
   assert.match(request.userPrompt, /add_review_comment/);
   assert.match(request.userPrompt, /P0/);
@@ -72,6 +76,42 @@ test("buildReviewPromptDraftRequest switches large diffs to command-guided revie
   assert.match(request.userPrompt, /`git --no-pager diff origin\/main`/);
 });
 
+test("buildReviewPromptDraftRequest shell-quotes unsafe command hint args", () => {
+  const unsafeSelector =
+    "https://github.com/owner/repo/pull/123?x=$(touch /tmp/pwn)";
+  const request = buildReviewPromptDraftRequest({
+    kind: "pr",
+    provider: "github",
+    selector: unsafeSelector,
+    targetHint: "unsafe selector",
+    number: 123,
+    title: "Unsafe selector",
+    body: "",
+    url: "https://github.com/owner/repo/pull/123",
+    author: "alice",
+    baseRefName: "main",
+    headRefName: "feature",
+    files: [],
+    existingNotes: [],
+    commandHints: [
+      {
+        label: "Show PR diff",
+        command: "gh",
+        args: ["pr", "diff", unsafeSelector],
+      },
+    ],
+  });
+
+  assert.match(
+    request.userPrompt,
+    /`gh pr diff 'https:\/\/github\.com\/owner\/repo\/pull\/123\?x=\$\(touch \/tmp\/pwn\)'`/,
+  );
+  assert.doesNotMatch(
+    request.userPrompt,
+    /`gh pr diff https:\/\/github\.com\/owner\/repo\/pull\/123\?x=\$\(touch \/tmp\/pwn\)`/,
+  );
+});
+
 test("buildReviewPromptDraftRequest preserves free-form prompt focus", () => {
   const request = buildReviewPromptDraftRequest({
     kind: "prompt",
@@ -93,7 +133,7 @@ test("buildReviewPromptDraftRequest preserves free-form prompt focus", () => {
   );
   assert.match(request.userPrompt, /Snapshot\/aspect review/);
   assert.match(request.userPrompt, /`find \. -type f`/);
-  assert.match(request.userPrompt, /`rg <query>`/);
+  assert.match(request.userPrompt, /`rg '<query>'`/);
 });
 
 test("buildReviewPromptDraftRequest includes PR metadata and dedupe notes", () => {

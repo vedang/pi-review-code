@@ -29,6 +29,29 @@ test("parseGitHubPrSelector parses number selectors", () => {
   });
 });
 
+test("parseGitHubPrSelector canonicalizes URLs and rejects search or hash", () => {
+  assert.deepEqual(
+    parseGitHubPrSelector(" HTTPS://github.com/owner/repo/pull/123/ "),
+    {
+      kind: "github",
+      selector: "https://github.com/owner/repo/pull/123",
+      owner: "owner",
+      repo: "repo",
+      number: 123,
+    },
+  );
+  assert.equal(
+    parseGitHubPrSelector(
+      "https://github.com/owner/repo/pull/123?x=$(touch%20/tmp/pwn)",
+    ),
+    undefined,
+  );
+  assert.equal(
+    parseGitHubPrSelector("https://github.com/owner/repo/pull/123#notes"),
+    undefined,
+  );
+});
+
 test("parseGitHubPrSelector rejects non-GitHub selectors", () => {
   assert.equal(
     parseGitHubPrSelector(

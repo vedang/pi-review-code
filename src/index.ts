@@ -15,7 +15,11 @@ import {
 import { createReviewFlowController } from "./flow.js";
 import { buildReviewPromptDraftRequest } from "./prompts.js";
 import { registerReviewMessageRenderers } from "./renderers.js";
-import { type ReviewStateManager, createReviewStateManager } from "./state.js";
+import {
+  type ReviewStateManager,
+  createReviewStateManager,
+  getLatestReviewState,
+} from "./state.js";
 import { resolveReviewTarget } from "./targets.js";
 
 export const REVIEW_HELP_TEXT = [
@@ -156,6 +160,30 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", (_event, ctx) => {
+    const latestState = getLatestReviewState(ctx);
+
+    if (latestState.activeKind === "review") {
+      stateManager.clearActiveRun(ctx);
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `Abandoned persisted pi-review-code review ${latestState.runId} after extension reload; start /review again.`,
+          "warning",
+        );
+      }
+      return;
+    }
+
+    if (latestState.activeKind === "fix") {
+      stateManager.clearActiveRun(ctx);
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `Abandoned persisted pi-review-code fix ${latestState.runId} after extension reload; start /review-fix again.`,
+          "warning",
+        );
+      }
+      return;
+    }
+
     stateManager.refresh(ctx);
   });
   pi.on("agent_end", (event, ctx) => controller.handleAgentEnd(event, ctx));

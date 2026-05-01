@@ -60,16 +60,18 @@ export async function resolveReviewTarget(
     const listCommand = buildGitDiffNameOnlyCommand(ref);
     const statCommand = buildGitDiffStatCommand(ref);
 
-    const [listResult, statResult] = await Promise.all([
+    const showDiffCommand = buildGitDiffCommand(ref);
+    const showFileDiffCommand = buildGitDiffForFileCommand(ref, "<file>");
+
+    const [listResult, statResult, diffResult] = await Promise.all([
       context.exec(listCommand.command, listCommand.args),
       context.exec(statCommand.command, statCommand.args),
+      context.exec(showDiffCommand.command, showDiffCommand.args),
     ]);
 
     const files = normalizeGitFileList(getStdout(listResult));
     const diffStat = getStdout(statResult).trim();
-
-    const showDiffCommand = buildGitDiffCommand(ref);
-    const showFileDiffCommand = buildGitDiffForFileCommand(ref, "<file>");
+    const diffText = getStdout(diffResult);
 
     const resolved: ResolvedDiffAgainstTarget = {
       kind: "diff-against",
@@ -77,6 +79,7 @@ export async function resolveReviewTarget(
       ref,
       files,
       diffStat,
+      diffText,
       commandHints: [
         commandHint(
           "List changed files",
@@ -126,8 +129,8 @@ export async function resolveReviewTarget(
 
     const resolved: ResolvedPrTarget = {
       kind: "pr",
-      targetHint: target.targetHint,
-      selector: target.selector,
+      targetHint: githubSelector.selector,
+      selector: githubSelector.selector,
       files: metadata.files,
       commandHints: [
         commandHint("Show PR diff", diffCommand.command, diffCommand.args),
@@ -155,8 +158,8 @@ export async function resolveReviewTarget(
 
     const resolved: ResolvedPrTarget = {
       kind: "pr",
-      targetHint: target.targetHint,
-      selector: target.selector,
+      targetHint: gitlabSelector.selector,
+      selector: gitlabSelector.selector,
       files: metadata.files,
       commandHints: [
         commandHint("Show MR diff", diffCommand.command, diffCommand.args),

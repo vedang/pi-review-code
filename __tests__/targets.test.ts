@@ -25,6 +25,8 @@ test("resolveReviewTarget resolves diff-against with safe command hints", async 
         )]: "src/a.ts\nsrc/b.ts\n",
         [["git", "--no-pager", "diff", "origin/main", "--stat"].join("\0")]:
           " 2 files changed",
+        [["git", "--no-pager", "diff", "origin/main"].join("\0")]:
+          "diff --git a/src/a.ts b/src/a.ts\n+change\n",
       }),
     },
   );
@@ -35,6 +37,7 @@ test("resolveReviewTarget resolves diff-against with safe command hints", async 
     ref: "origin/main",
     files: ["src/a.ts", "src/b.ts"],
     diffStat: "2 files changed",
+    diffText: "diff --git a/src/a.ts b/src/a.ts\n+change\n",
     commandHints: [
       {
         label: "List changed files",
@@ -186,6 +189,31 @@ test("resolveReviewTarget resolves GitLab MR metadata with fake exec", async () 
       ],
     },
   ]);
+});
+
+test("resolveReviewTarget rejects PR URLs with search before exec", async () => {
+  let called = false;
+
+  await assert.rejects(
+    () =>
+      resolveReviewTarget(
+        {
+          kind: "pr",
+          selector:
+            "https://github.com/owner/repo/pull/123?x=$(touch%20/tmp/pwn)",
+          targetHint:
+            "https://github.com/owner/repo/pull/123?x=$(touch%20/tmp/pwn)",
+        },
+        {
+          exec: async () => {
+            called = true;
+            return { stdout: "", stderr: "", exitCode: 0 };
+          },
+        },
+      ),
+    /Unsupported PR\/MR selector/,
+  );
+  assert.equal(called, false);
 });
 
 test("resolveReviewTarget rejects unrecognized PR selectors", async () => {

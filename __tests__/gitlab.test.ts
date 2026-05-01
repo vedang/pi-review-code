@@ -39,6 +39,34 @@ test("parseGitLabMrSelector parses self-hosted nested project URLs", () => {
   );
 });
 
+test("parseGitLabMrSelector canonicalizes URLs and rejects search or hash", () => {
+  assert.deepEqual(
+    parseGitLabMrSelector(
+      " HTTPS://GITLAB.example.com/group/sub/project/-/merge_requests/7/ ",
+    ),
+    {
+      kind: "gitlab",
+      selector:
+        "https://gitlab.example.com/group/sub/project/-/merge_requests/7",
+      host: "gitlab.example.com",
+      projectPath: "group/sub/project",
+      number: 7,
+    },
+  );
+  assert.equal(
+    parseGitLabMrSelector(
+      "https://gitlab.com/group/project/-/merge_requests/45?x=$(touch%20/tmp/pwn)",
+    ),
+    undefined,
+  );
+  assert.equal(
+    parseGitLabMrSelector(
+      "https://gitlab.com/group/project/-/merge_requests/45#notes",
+    ),
+    undefined,
+  );
+});
+
 test("parseGitLabMrSelector rejects non-GitLab selectors", () => {
   assert.equal(
     parseGitLabMrSelector("https://github.com/owner/repo/pull/1"),

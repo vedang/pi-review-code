@@ -167,6 +167,7 @@ export type ResolvedDiffAgainstTarget = {
   files: string[];
   diffStat: string;
   commandHints: ReviewTargetCommandHint[];
+  diffText?: string;
 };
 
 export type ResolvedPromptTarget = {
