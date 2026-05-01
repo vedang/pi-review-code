@@ -39,6 +39,7 @@ type HarnessOptions = {
   editorResult?: string | undefined;
   draftOk?: boolean;
   navigateResults?: Array<{ cancelled: boolean } | Error>;
+  target?: ResolvedReviewTarget;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -55,7 +56,7 @@ function createHarness(options: HarnessOptions = {}) {
   const resolvedTargets: unknown[] = [];
   const draftRequests: unknown[] = [];
 
-  const target = promptTarget();
+  const target = options.target ?? promptTarget();
   const draftOk = options.draftOk ?? true;
   const navigateResults = [...(options.navigateResults ?? [])];
 
@@ -183,6 +184,77 @@ test("review flow launches branch after human submits generated prompt", async (
     },
   ]);
   assert.equal(harness.draftRequests.length, 1);
+});
+
+test("review flow launches PR review after resolving PR metadata", async () => {
+  const selector = "https://github.com/owner/repo/pull/123";
+  const harness = createHarness({
+    editorResult: "Edited PR review prompt",
+    target: {
+      kind: "pr",
+      targetHint: selector,
+      selector,
+      files: ["src/auth.ts"],
+      commandHints: [
+        {
+          label: "Show PR diff",
+          command: "gh",
+          args: ["pr", "diff", selector],
+        },
+      ],
+      provider: "github",
+      number: 123,
+      title: "Fix auth",
+      body: "Tighten auth checks.",
+      url: selector,
+      author: "alice",
+      baseRefName: "main",
+      headRefName: "auth-fix",
+      existingNotes: ["bob: existing concern"],
+    },
+  });
+
+  await harness.controller.handleReviewCommand(`pr ${selector}`, harness.ctx);
+
+  assert.deepEqual(harness.resolvedTargets, [
+    { kind: "pr", selector, targetHint: selector },
+  ]);
+  assert.deepEqual(harness.draftRequests, [
+    {
+      kind: "pr",
+      targetHint: selector,
+      selector,
+      files: ["src/auth.ts"],
+      commandHints: [
+        {
+          label: "Show PR diff",
+          command: "gh",
+          args: ["pr", "diff", selector],
+        },
+      ],
+      provider: "github",
+      number: 123,
+      title: "Fix auth",
+      body: "Tighten auth checks.",
+      url: selector,
+      author: "alice",
+      baseRefName: "main",
+      headRefName: "auth-fix",
+      existingNotes: ["bob: existing concern"],
+    },
+  ]);
+  assert.deepEqual(harness.sentUserMessages, ["Edited PR review prompt"]);
+  assert.deepEqual(harness.startedRuns, [
+    {
+      runId: "review-1",
+      originLeafId: "leaf-origin",
+      targetHint: selector,
+      reviewPrompt: "Edited PR review prompt",
+      originModelProvider: "anthropic",
+      originModelId: "claude-sonnet",
+      originThinkingLevel: "high",
+    },
+  ]);
 });
 
 test("review flow cancels cleanly when editor returns undefined", async () => {

@@ -22,7 +22,7 @@ export const REVIEW_HELP_TEXT = [
   "Usage:",
   "- /review diff-against <ref>",
   "- /review prompt <review request>",
-  "- /review pr <url-or-ref> (coming in next iteration)",
+  "- /review pr <url-or-ref>",
 ].join("\n");
 
 export const REVIEW_FIX_HELP_TEXT = [

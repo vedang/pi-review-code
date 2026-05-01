@@ -270,14 +270,6 @@ export function createReviewFlowController(
         return;
       }
 
-      if (command.target.kind === "pr") {
-        ctx.ui.notify(
-          "`/review pr` is not supported in this iteration. Use `/review diff-against` or `/review prompt`.",
-          "error",
-        );
-        return;
-      }
-
       const originLeafId = ensureOriginLeafId(ctx, dependencies.pi);
       if (originLeafId === null) {
         ctx.ui.notify(
