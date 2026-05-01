@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 
 import {
+  REVIEW_PROMPT_ENTRY_TYPE,
   REVIEW_SUMMARY_ENTRY_TYPE,
   buildReviewBranchSummary,
   createReviewFlowController,
@@ -45,6 +46,12 @@ type HarnessOptions = {
 function createHarness(options: HarnessOptions = {}) {
   const notifications: Array<{ message: string; level: string }> = [];
   const sentUserMessages: string[] = [];
+  const sentMessages: Array<{
+    customType?: string;
+    content?: unknown;
+    display?: boolean;
+    details?: unknown;
+  }> = [];
   const appended: Array<{ customType: string; data: unknown }> = [];
   const navigateCalls: Array<{
     targetId: string;
@@ -67,6 +74,14 @@ function createHarness(options: HarnessOptions = {}) {
       },
       appendEntry: (customType: string, data: unknown) => {
         appended.push({ customType, data });
+      },
+      sendMessage: (message: {
+        customType?: string;
+        content?: unknown;
+        display?: boolean;
+        details?: unknown;
+      }) => {
+        sentMessages.push(message);
       },
     },
     stateManager: {
@@ -144,6 +159,7 @@ function createHarness(options: HarnessOptions = {}) {
     ctx,
     notifications,
     sentUserMessages,
+    sentMessages,
     appended,
     navigateCalls,
     startedRuns,
@@ -317,6 +333,42 @@ test("review flow requires active model", async () => {
       level: "error",
     },
   ]);
+});
+
+test("review flow emits custom prompt and summary messages for renderers", async () => {
+  const harness = createHarness({ editorResult: "Edited review prompt" });
+
+  await harness.controller.handleReviewCommand(
+    "prompt review auth boundaries",
+    harness.ctx,
+  );
+
+  assert.equal(harness.sentMessages.length, 1);
+  assert.equal(harness.sentMessages[0]?.customType, REVIEW_PROMPT_ENTRY_TYPE);
+  assert.equal(harness.sentMessages[0]?.content, "Review prompt review-1");
+  assert.equal(harness.sentMessages[0]?.display, true);
+  assert.deepEqual(harness.sentMessages[0]?.details, {
+    kind: "prompt",
+    mode: "review",
+    runId: "review-1",
+    targetHint: "review auth boundaries",
+    reviewPrompt: "Edited review prompt",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  });
+
+  await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
+    sessionManager: harness.ctx.sessionManager,
+  } as never);
+
+  assert.equal(harness.sentMessages.length, 2);
+  assert.equal(harness.sentMessages[1]?.customType, REVIEW_SUMMARY_ENTRY_TYPE);
+  assert.equal(harness.sentMessages[1]?.display, true);
+  assert.match(
+    JSON.stringify(harness.sentMessages[1]?.details),
+    /Token refresh can race/,
+  );
 });
 
 test("review flow collapses active branch on agent end with custom summary", async () => {

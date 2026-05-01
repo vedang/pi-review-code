@@ -14,6 +14,7 @@ import {
 } from "./draft";
 import { createReviewFlowController } from "./flow";
 import { buildReviewPromptDraftRequest } from "./prompts";
+import { registerReviewMessageRenderers } from "./renderers";
 import { type ReviewStateManager, createReviewStateManager } from "./state";
 import { resolveReviewTarget } from "./targets";
 
@@ -38,7 +39,10 @@ type ReviewRuntimeMethods = Pick<
   "appendEntry" | "getActiveTools" | "registerTool" | "setActiveTools"
 >;
 
+type ReviewRendererMethods = Pick<ExtensionAPI, "registerMessageRenderer">;
+
 type ReviewRuntimeAPI = ExtensionAPI & ReviewRuntimeMethods;
+type ReviewRendererAPI = ExtensionAPI & ReviewRendererMethods;
 
 function isReviewRuntime(pi: ExtensionAPI): pi is ReviewRuntimeAPI {
   const candidate = pi as Partial<Record<keyof ReviewRuntimeMethods, unknown>>;
@@ -49,6 +53,12 @@ function isReviewRuntime(pi: ExtensionAPI): pi is ReviewRuntimeAPI {
     typeof candidate.getActiveTools === "function" &&
     typeof candidate.setActiveTools === "function"
   );
+}
+
+function isReviewRendererRuntime(pi: ExtensionAPI): pi is ReviewRendererAPI {
+  const candidate = pi as Partial<Record<keyof ReviewRendererMethods, unknown>>;
+
+  return typeof candidate.registerMessageRenderer === "function";
 }
 
 function registerReviewRuntimeHelpers(
@@ -86,6 +96,10 @@ function registerInfoCommand(
 }
 
 export default function reviewCodeExtension(pi: ExtensionAPI): void {
+  if (isReviewRendererRuntime(pi)) {
+    registerReviewMessageRenderers(pi);
+  }
+
   const stateManager = registerReviewRuntimeHelpers(pi);
 
   if (stateManager === null) {

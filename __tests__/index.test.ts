@@ -16,6 +16,7 @@ type Harness = ReturnType<typeof createHarness>;
 
 function createHarness() {
   const commands = new Map<string, RegisteredCommand["handler"]>();
+  const messageRenderers = new Map<string, unknown>();
   const notifications: Array<{ message: string; level: string }> = [];
 
   const ctx = {
@@ -34,11 +35,14 @@ function createHarness() {
     ) => {
       commands.set(name, options.handler);
     },
+    registerMessageRenderer: (customType: string, renderer: unknown) => {
+      messageRenderers.set(customType, renderer);
+    },
   } as unknown as ExtensionAPI;
 
   reviewCodeExtension(pi);
 
-  return { commands, notifications, ctx };
+  return { commands, messageRenderers, notifications, ctx };
 }
 
 async function runCommand(
@@ -52,11 +56,14 @@ async function runCommand(
   await handler(args, harness.ctx);
 }
 
-test("extension registers review commands", () => {
+test("extension registers review commands and message renderers", () => {
   const harness = createHarness();
 
   assert.ok(harness.commands.has("review"));
   assert.ok(harness.commands.has("review-fix"));
+  assert.ok(harness.messageRenderers.has("pi-review-code:prompt"));
+  assert.ok(harness.messageRenderers.has("pi-review-code:review-summary"));
+  assert.ok(harness.messageRenderers.has("pi-review-code:review-fix-summary"));
 });
 
 test("/review shows scaffold help", async () => {

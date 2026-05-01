@@ -5,6 +5,7 @@ import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 
 import {
   REVIEW_FIX_SUMMARY_ENTRY_TYPE,
+  REVIEW_PROMPT_ENTRY_TYPE,
   REVIEW_SUMMARY_ENTRY_TYPE,
   buildFixBranchSummary,
   createReviewFlowController,
@@ -120,6 +121,12 @@ type HarnessOptions = {
 function createHarness(options: HarnessOptions = {}) {
   const notifications: Array<{ message: string; level: string }> = [];
   const sentUserMessages: string[] = [];
+  const sentMessages: Array<{
+    customType?: string;
+    content?: unknown;
+    display?: boolean;
+    details?: unknown;
+  }> = [];
   const appended: Array<{ customType: string; data: unknown }> = [];
   const navigateCalls: Array<{
     targetId: string;
@@ -140,6 +147,14 @@ function createHarness(options: HarnessOptions = {}) {
       },
       appendEntry: (customType: string, data: unknown) => {
         appended.push({ customType, data });
+      },
+      sendMessage: (message: {
+        customType?: string;
+        content?: unknown;
+        display?: boolean;
+        details?: unknown;
+      }) => {
+        sentMessages.push(message);
       },
     },
     stateManager: {
@@ -212,6 +227,7 @@ function createHarness(options: HarnessOptions = {}) {
     ctx,
     notifications,
     sentUserMessages,
+    sentMessages,
     appended,
     navigateCalls,
     startedFixRuns,
@@ -258,6 +274,41 @@ test("review-fix reports missing review summary without launching", async () => 
       level: "error",
     },
   ]);
+});
+
+test("review-fix emits custom prompt and summary messages for renderers", async () => {
+  const harness = createHarness();
+
+  await harness.controller.handleReviewFixCommand("latest", harness.ctx);
+
+  assert.equal(harness.sentMessages.length, 1);
+  assert.equal(harness.sentMessages[0]?.customType, REVIEW_PROMPT_ENTRY_TYPE);
+  assert.equal(harness.sentMessages[0]?.content, "Review-fix prompt fix-1");
+  assert.equal(harness.sentMessages[0]?.display, true);
+  assert.deepEqual(harness.sentMessages[0]?.details, {
+    kind: "prompt",
+    mode: "fix",
+    runId: "fix-1",
+    targetHint: "review auth boundaries",
+    reviewPrompt: harness.sentUserMessages[0],
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1"],
+  });
+
+  await harness.controller.handleAgentEnd(harness.createFixAgentEndEvent(), {
+    sessionManager: harness.ctx.sessionManager,
+  } as never);
+
+  assert.equal(harness.sentMessages.length, 2);
+  assert.equal(
+    harness.sentMessages[1]?.customType,
+    REVIEW_FIX_SUMMARY_ENTRY_TYPE,
+  );
+  assert.equal(harness.sentMessages[1]?.display, true);
+  assert.match(JSON.stringify(harness.sentMessages[1]?.details), /comment-1/);
 });
 
 test("review-fix collapses active fix branch with custom summary", async () => {

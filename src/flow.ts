@@ -24,6 +24,7 @@ import {
 } from "./types";
 
 export const REVIEW_ANCHOR_MESSAGE_TYPE = "pi-review-code:anchor";
+export const REVIEW_PROMPT_ENTRY_TYPE = "pi-review-code:prompt";
 export const REVIEW_SUMMARY_ENTRY_TYPE = "pi-review-code:review-summary";
 export const REVIEW_FIX_SUMMARY_ENTRY_TYPE =
   "pi-review-code:review-fix-summary";
@@ -48,6 +49,19 @@ export type ReviewBranchSummaryDetails = {
 export type ReviewBranchSummary = {
   summary: string;
   details: ReviewBranchSummaryDetails;
+};
+
+export type ReviewPromptMessageDetails = {
+  kind: "prompt";
+  mode: "review" | "fix";
+  runId: string;
+  targetHint: string;
+  reviewPrompt: string;
+  originModelProvider: string;
+  originModelId: string;
+  originThinkingLevel: string;
+  sourceReviewRunId?: string;
+  commentIds?: string[];
 };
 
 export type BuildFixBranchSummaryInput = {
@@ -564,6 +578,53 @@ function extractLabelPrefix(label: string): string | undefined {
   return undefined;
 }
 
+function buildPromptMessageContent(
+  details: ReviewPromptMessageDetails,
+): string {
+  const label =
+    details.mode === "review" ? "Review prompt" : "Review-fix prompt";
+  return `${label} ${details.runId}`;
+}
+
+function sendPromptMessage(
+  runtime: ReviewFlowRuntime,
+  details: ReviewPromptMessageDetails,
+): void {
+  runtime.sendMessage?.({
+    customType: REVIEW_PROMPT_ENTRY_TYPE,
+    content: buildPromptMessageContent(details),
+    display: true,
+    details,
+  });
+}
+
+function buildSummaryMessageContent(
+  summary: ReviewBranchSummary | FixBranchSummary,
+): string {
+  if (summary.details.kind === "review") {
+    const count = summary.details.comments.length;
+    return `Review ${summary.details.runId} completed with ${count} finding${count === 1 ? "" : "s"}.`;
+  }
+
+  const count = summary.details.comments.length;
+  return `Review-fix ${summary.details.runId} completed for ${count} finding${count === 1 ? "" : "s"}.`;
+}
+
+function sendSummaryMessage(
+  runtime: ReviewFlowRuntime,
+  summary: ReviewBranchSummary | FixBranchSummary,
+): void {
+  runtime.sendMessage?.({
+    customType:
+      summary.details.kind === "review"
+        ? REVIEW_SUMMARY_ENTRY_TYPE
+        : REVIEW_FIX_SUMMARY_ENTRY_TYPE,
+    content: buildSummaryMessageContent(summary),
+    display: true,
+    details: summary.details,
+  });
+}
+
 export function createReviewFlowController(
   dependencies: ReviewFlowDependencies,
 ): ReviewFlowController {
@@ -658,6 +719,16 @@ export function createReviewFlowController(
 
     dependencies.stateManager.startReviewRun(ctx, runInfo);
     activeRun = { ...runInfo, kind: "review", commandCtx: ctx };
+    sendPromptMessage(dependencies.pi, {
+      kind: "prompt",
+      mode: "review",
+      runId: runInfo.runId,
+      targetHint: runInfo.targetHint,
+      reviewPrompt: runInfo.reviewPrompt,
+      originModelProvider: runInfo.originModelProvider,
+      originModelId: runInfo.originModelId,
+      originThinkingLevel: runInfo.originThinkingLevel,
+    });
 
     ctx.ui.notify(`Review branch started: ${runInfo.runId}`, "info");
     dependencies.pi.sendUserMessage(editedPrompt);
@@ -762,6 +833,18 @@ export function createReviewFlowController(
       commandCtx: ctx,
       selectedComments: selectedSummary.comments,
     };
+    sendPromptMessage(dependencies.pi, {
+      kind: "prompt",
+      mode: "fix",
+      runId: fixRunInfo.runId,
+      targetHint: fixRunInfo.targetHint,
+      reviewPrompt: fixRunInfo.reviewPrompt,
+      originModelProvider: fixRunInfo.originModelProvider,
+      originModelId: fixRunInfo.originModelId,
+      originThinkingLevel: fixRunInfo.originThinkingLevel,
+      sourceReviewRunId: fixRunInfo.sourceReviewRunId,
+      commentIds: fixRunInfo.commentIds,
+    });
 
     ctx.ui.notify(`Fix branch started: ${fixRunInfo.runId}`, "info");
     dependencies.pi.sendUserMessage(fixPrompt);
@@ -836,6 +919,7 @@ export function createReviewFlowController(
           : REVIEW_FIX_SUMMARY_ENTRY_TYPE;
 
       dependencies.pi.appendEntry(summaryEntryType, summary);
+      sendSummaryMessage(dependencies.pi, summary);
       activeRun = null;
       dependencies.stateManager.clearActiveRun(run.commandCtx);
     },
