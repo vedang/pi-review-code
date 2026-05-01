@@ -3,6 +3,7 @@ import type {
   ResolvedPrTarget,
   ResolvedPromptTarget,
   ResolvedReviewTarget,
+  ReviewComment,
   ReviewTargetCommandHint,
 } from "./types";
 
@@ -116,6 +117,55 @@ function buildPrReviewBlock(target: ResolvedPrTarget): string {
     "",
     `Command hints:\n${buildCommandHintsBlock(target.commandHints)}`,
     ...existingNotesBlock,
+  ].join("\n");
+}
+
+function formatReference(reference: {
+  filePath: string;
+  startLine: number;
+  endLine?: number;
+}): string {
+  if (
+    reference.endLine !== undefined &&
+    reference.endLine !== reference.startLine
+  ) {
+    return `${reference.filePath}:${reference.startLine}-${reference.endLine}`;
+  }
+
+  return `${reference.filePath}:${reference.startLine}`;
+}
+
+export function buildReviewFixPrompt(input: {
+  reviewRunId: string;
+  targetHint: string;
+  comments: ReviewComment[];
+}): string {
+  const findingLines =
+    input.comments.length === 0
+      ? ["No findings were selected for fixing."]
+      : input.comments.map((comment, index) => {
+          const referenceText =
+            comment.references.length === 0
+              ? ""
+              : ` (${comment.references.map(formatReference).join(", ")})`;
+
+          return `${index + 1}. [${comment.priority}] ${comment.id}${referenceText}: ${comment.comment}`;
+        });
+
+  return [
+    `Fix findings from pi-review-code review ${input.reviewRunId}`,
+    `Target: ${input.targetHint}`,
+    "",
+    "Work through comments in order:",
+    ...findingLines,
+    "",
+    "Make focused code changes that address each finding directly.",
+    "Run relevant tests/checks when appropriate.",
+    "Final response must include:",
+    "- What changed",
+    "- Which finding each change addresses",
+    "- Tests/checks run (or why not)",
+    "- Any follow-up risks",
   ].join("\n");
 }
 

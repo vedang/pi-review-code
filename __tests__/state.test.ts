@@ -100,6 +100,94 @@ test("review state manager persists review run and enables comment tool", () => 
   ]);
 });
 
+test("review state manager persists fix run and disables comment tool", () => {
+  let activeTools = ["read", "add_review_comment", "bash"];
+  const setActiveToolsCalls: string[][] = [];
+  const appended: Array<{ customType: string; data: unknown }> = [];
+  const manager = createReviewStateManager({
+    appendEntry: (customType: string, data: unknown) =>
+      appended.push({ customType, data }),
+    getActiveTools: () => activeTools,
+    setActiveTools: (nextTools: string[]) => {
+      setActiveToolsCalls.push(nextTools);
+      activeTools = nextTools;
+    },
+  } as never);
+
+  manager.startFixRun({ hasUI: false } as never, {
+    originLeafId: "leaf-2",
+    runId: "fix-1",
+    targetHint: "origin/main",
+    reviewPrompt: "Fix review comments",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1", "comment-2"],
+  });
+
+  assert.deepEqual(setActiveToolsCalls, [["read", "bash"]]);
+  assert.deepEqual(appended, [
+    {
+      customType: REVIEW_STATE_ENTRY_TYPE,
+      data: {
+        version: 1,
+        activeKind: "fix",
+        originLeafId: "leaf-2",
+        runId: "fix-1",
+        targetHint: "origin/main",
+        reviewPrompt: "Fix review comments",
+        originModelProvider: "anthropic",
+        originModelId: "claude-sonnet",
+        originThinkingLevel: "medium",
+        sourceReviewRunId: "review-1",
+        commentIds: ["comment-1", "comment-2"],
+      },
+    },
+  ]);
+  assert.deepEqual(manager.getState(), appended[0]?.data);
+});
+
+test("getLatestReviewState reconstructs persisted fix state", () => {
+  const state = getLatestReviewState({
+    sessionManager: {
+      getEntries: () => [
+        {
+          type: "custom",
+          customType: REVIEW_STATE_ENTRY_TYPE,
+          data: {
+            version: 1,
+            activeKind: "fix",
+            originLeafId: "leaf-2",
+            runId: "fix-1",
+            targetHint: "origin/main",
+            reviewPrompt: "Fix review comments",
+            originModelProvider: "anthropic",
+            originModelId: "claude-sonnet",
+            originThinkingLevel: "medium",
+            sourceReviewRunId: "review-1",
+            commentIds: ["comment-1"],
+          },
+        },
+      ],
+    },
+  } as never);
+
+  assert.deepEqual(state, {
+    version: 1,
+    activeKind: "fix",
+    originLeafId: "leaf-2",
+    runId: "fix-1",
+    targetHint: "origin/main",
+    reviewPrompt: "Fix review comments",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1"],
+  });
+});
+
 test("review state manager clears active run and disables comment tool", () => {
   let activeTools = ["read", "add_review_comment", "bash"];
   const setActiveToolsCalls: string[][] = [];

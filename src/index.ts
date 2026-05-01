@@ -26,12 +26,11 @@ export const REVIEW_HELP_TEXT = [
 ].join("\n");
 
 export const REVIEW_FIX_HELP_TEXT = [
-  "pi-review-code fix scaffold is installed.",
-  "Planned usage:",
+  "pi-review-code fix flow is installed.",
+  "Usage:",
   "- /review-fix",
   "- /review-fix latest",
   "- /review-fix <run-id>",
-  "Review comment selection and fix branch lifecycle will be added later.",
 ].join("\n");
 
 type ReviewRuntimeMethods = Pick<
@@ -87,16 +86,15 @@ function registerInfoCommand(
 }
 
 export default function reviewCodeExtension(pi: ExtensionAPI): void {
-  registerInfoCommand(
-    pi,
-    "review-fix",
-    "Fix findings from a recent pi-review-code run",
-    REVIEW_FIX_HELP_TEXT,
-  );
-
   const stateManager = registerReviewRuntimeHelpers(pi);
 
   if (stateManager === null) {
+    registerInfoCommand(
+      pi,
+      "review-fix",
+      "Fix findings from a recent pi-review-code run",
+      REVIEW_FIX_HELP_TEXT,
+    );
     registerInfoCommand(
       pi,
       "review",
@@ -147,6 +145,17 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
   pi.on("session_before_tree", (event) =>
     controller.handleSessionBeforeTree(event),
   );
+
+  pi.registerCommand("review-fix", {
+    description: "Fix findings from a recent pi-review-code run",
+    handler: async (args, ctx) => {
+      if (!ctx.hasUI) {
+        return;
+      }
+
+      await controller.handleReviewFixCommand(args, ctx);
+    },
+  });
 
   pi.registerCommand("review", {
     description: "Start a context-rich code review",

@@ -65,6 +65,11 @@ export interface ReviewActiveRunInfo {
   originThinkingLevel: string;
 }
 
+export interface ReviewFixRunInfo extends ReviewActiveRunInfo {
+  sourceReviewRunId: string;
+  commentIds: string[];
+}
+
 export interface ReviewActiveState
   extends ReviewStateBase,
     ReviewActiveRunInfo {
@@ -75,7 +80,7 @@ export interface ReviewInactiveState extends ReviewStateBase {
   activeKind: null;
 }
 
-export interface ReviewFixState extends ReviewStateBase, ReviewActiveRunInfo {
+export interface ReviewFixState extends ReviewStateBase, ReviewFixRunInfo {
   activeKind: "fix";
 }
 
@@ -85,6 +90,7 @@ export type ReviewState =
   | ReviewFixState;
 
 export type ReviewStateStart = ReviewActiveRunInfo;
+export type ReviewFixStateStart = ReviewFixRunInfo;
 
 export type ReviewCommentPriority = "P0" | "P1" | "P2" | "P3";
 

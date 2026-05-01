@@ -5,20 +5,28 @@ import type {
   SessionBeforeTreeEvent,
 } from "@mariozechner/pi-coding-agent";
 
-import { parseReviewArgs } from "./command";
+import { parseReviewArgs, parseReviewFixArgs } from "./command";
 import type {
   PiReviewThinkingLevel,
   ReviewPromptDraftGenerationResult,
 } from "./draft";
+import { buildReviewFixPrompt } from "./prompts";
 import type { ReviewPromptDraftRequest } from "./prompts";
-import type {
-  ResolvedReviewTarget,
-  ReviewComment,
-  ReviewTarget,
+import {
+  type AddReviewCommentReference,
+  REVIEW_COMMENT_PRIORITIES,
+  REVIEW_STATE_VERSION,
+  type ResolvedReviewTarget,
+  type ReviewComment,
+  type ReviewFixRunInfo,
+  type ReviewFixSelector,
+  type ReviewTarget,
 } from "./types";
 
 export const REVIEW_ANCHOR_MESSAGE_TYPE = "pi-review-code:anchor";
 export const REVIEW_SUMMARY_ENTRY_TYPE = "pi-review-code:review-summary";
+export const REVIEW_FIX_SUMMARY_ENTRY_TYPE =
+  "pi-review-code:review-fix-summary";
 
 export type BuildReviewBranchSummaryInput = {
   runId: string;
@@ -42,10 +50,44 @@ export type ReviewBranchSummary = {
   details: ReviewBranchSummaryDetails;
 };
 
+export type BuildFixBranchSummaryInput = {
+  runId: string;
+  sourceReviewRunId: string;
+  targetHint: string;
+  fixPrompt: string;
+  comments: ReviewComment[];
+  agentSummary: string;
+  completedAt: number;
+};
+
+export type FixBranchSummaryDetails = {
+  kind: "fix";
+  runId: string;
+  sourceReviewRunId: string;
+  targetHint: string;
+  fixPrompt: string;
+  completedAt: number;
+  comments: ReviewComment[];
+  agentSummary: string;
+};
+
+export type FixBranchSummary = {
+  summary: string;
+  details: FixBranchSummaryDetails;
+};
+
+export type ReviewSummaryForFix = {
+  runId: string;
+  targetHint: string;
+  reviewPrompt: string;
+  completedAt: number;
+  comments: ReviewComment[];
+};
+
 export type ReviewSessionBeforeTreeResult = {
   summary: {
     summary: string;
-    details: ReviewBranchSummaryDetails;
+    details: ReviewBranchSummaryDetails | FixBranchSummaryDetails;
   };
 };
 
@@ -98,8 +140,303 @@ export function buildReviewBranchSummary(
   };
 }
 
+export function buildFixBranchSummary(
+  input: BuildFixBranchSummaryInput,
+): FixBranchSummary {
+  const findingLines =
+    input.comments.length === 0
+      ? ["No findings were selected for this fix run."]
+      : input.comments.map((comment) => {
+          const referenceText =
+            comment.references.length === 0
+              ? ""
+              : ` (${comment.references.map(formatReference).join(", ")})`;
+
+          return `- ${comment.priority} ${comment.id}${referenceText}: ${comment.comment}`;
+        });
+
+  return {
+    summary: [
+      `pi-review-code review-fix ${input.runId}`,
+      `Source review: ${input.sourceReviewRunId}`,
+      `Target: ${input.targetHint}`,
+      `Prompt: ${input.fixPrompt}`,
+      "",
+      ...findingLines,
+      "",
+      `Agent summary: ${input.agentSummary}`,
+    ].join("\n"),
+    details: {
+      kind: "fix",
+      runId: input.runId,
+      sourceReviewRunId: input.sourceReviewRunId,
+      targetHint: input.targetHint,
+      fixPrompt: input.fixPrompt,
+      completedAt: input.completedAt,
+      comments: input.comments,
+      agentSummary: input.agentSummary,
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function extractTextContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .map((block) => {
+      if (!isRecord(block) || block.type !== "text") {
+        return "";
+      }
+
+      return typeof block.text === "string" ? block.text : "";
+    })
+    .join("");
+}
+
+function extractAssistantSummary(event: unknown): string {
+  if (!isRecord(event) || !Array.isArray(event.messages)) {
+    return "";
+  }
+
+  for (let index = event.messages.length - 1; index >= 0; index -= 1) {
+    const message = event.messages[index];
+    if (!isRecord(message) || message.role !== "assistant") {
+      continue;
+    }
+
+    return extractTextContent(message.content).trim();
+  }
+
+  return "";
+}
+
+function isValidPriority(value: unknown): value is ReviewComment["priority"] {
+  return (
+    typeof value === "string" &&
+    new Set(REVIEW_COMMENT_PRIORITIES).has(value as ReviewComment["priority"])
+  );
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function parseReference(value: unknown): AddReviewCommentReference | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const filePath =
+    typeof value.filePath === "string" ? value.filePath.trim() : "";
+  const startLine = value.startLine;
+  const endLine = value.endLine;
+
+  if (filePath.length === 0 || !isPositiveInteger(startLine)) {
+    return undefined;
+  }
+
+  if (endLine !== undefined) {
+    if (!isPositiveInteger(endLine) || endLine < startLine) {
+      return undefined;
+    }
+
+    return { filePath, startLine, endLine };
+  }
+
+  return { filePath, startLine };
+}
+
+function parseReferences(
+  value: unknown,
+): AddReviewCommentReference[] | undefined {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const references: AddReviewCommentReference[] = [];
+
+  for (const raw of value) {
+    const parsed = parseReference(raw);
+    if (parsed === undefined) {
+      return undefined;
+    }
+    references.push(parsed);
+  }
+
+  return references;
+}
+
+function parseReviewComment(value: unknown): ReviewComment | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const comment = value.comment;
+  const createdAt = value.createdAt;
+  const references = parseReferences(value.references);
+  if (
+    value.version !== REVIEW_STATE_VERSION ||
+    typeof value.id !== "string" ||
+    value.id.trim().length === 0 ||
+    typeof value.runId !== "string" ||
+    value.runId.trim().length === 0 ||
+    !isValidPriority(value.priority) ||
+    typeof comment !== "string" ||
+    comment.trim().length === 0 ||
+    typeof createdAt !== "number" ||
+    !Number.isFinite(createdAt) ||
+    references === undefined
+  ) {
+    return undefined;
+  }
+
+  const rawTargetHint = value.targetHint;
+
+  return {
+    version: REVIEW_STATE_VERSION,
+    id: value.id,
+    runId: value.runId,
+    priority: value.priority,
+    comment,
+    references,
+    createdAt,
+    targetHint: typeof rawTargetHint === "string" ? rawTargetHint : "",
+  };
+}
+
+type ParsedReviewSummaryForFix = ReviewSummaryForFix & { order: number };
+
+function parseReviewSummaryForFixEntry(
+  value: unknown,
+  order: number,
+): ParsedReviewSummaryForFix | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (
+    value.type !== "custom" ||
+    value.customType !== REVIEW_SUMMARY_ENTRY_TYPE
+  ) {
+    return undefined;
+  }
+
+  const data = isRecord(value.data) ? value.data : undefined;
+  if (data === undefined || !isRecord(data.details)) {
+    return undefined;
+  }
+
+  const details = data.details;
+  const rawRunId = details.runId;
+  const rawTargetHint = details.targetHint;
+  const rawReviewPrompt = details.reviewPrompt;
+  const rawCompletedAt = details.completedAt;
+
+  if (
+    typeof details.kind !== "string" ||
+    details.kind !== "review" ||
+    typeof rawRunId !== "string" ||
+    rawRunId.trim().length === 0 ||
+    typeof rawTargetHint !== "string" ||
+    typeof rawReviewPrompt !== "string" ||
+    typeof rawCompletedAt !== "number" ||
+    !Number.isFinite(rawCompletedAt)
+  ) {
+    return undefined;
+  }
+
+  const commentsRaw = Array.isArray(details.comments) ? details.comments : [];
+  const comments: ReviewComment[] = [];
+
+  for (const raw of commentsRaw) {
+    const parsedComment = parseReviewComment(raw);
+    if (parsedComment !== undefined && parsedComment.runId === rawRunId) {
+      comments.push(parsedComment);
+    }
+  }
+
+  return {
+    runId: rawRunId,
+    targetHint: rawTargetHint,
+    reviewPrompt: rawReviewPrompt,
+    completedAt: rawCompletedAt,
+    comments,
+    order,
+  };
+}
+
+function chooseLatestReviewSummary(
+  a: ParsedReviewSummaryForFix,
+  b: ParsedReviewSummaryForFix,
+): ParsedReviewSummaryForFix {
+  if (a.completedAt > b.completedAt) {
+    return a;
+  }
+
+  if (a.completedAt < b.completedAt) {
+    return b;
+  }
+
+  return a.order > b.order ? a : b;
+}
+
+export function selectReviewSummaryForFix(
+  entries: unknown[],
+  selector: ReviewFixSelector,
+): ReviewSummaryForFix | undefined {
+  const candidates: ParsedReviewSummaryForFix[] = [];
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const parsed = parseReviewSummaryForFixEntry(entries[index], index);
+    if (parsed === undefined || parsed.comments.length === 0) {
+      continue;
+    }
+
+    if (selector.kind === "run-id" && parsed.runId !== selector.runId) {
+      continue;
+    }
+
+    candidates.push(parsed);
+  }
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const selected = candidates.reduce(
+    (best, candidate) => chooseLatestReviewSummary(candidate, best),
+    candidates[0],
+  );
+
+  return {
+    runId: selected.runId,
+    targetHint: selected.targetHint,
+    reviewPrompt: selected.reviewPrompt,
+    completedAt: selected.completedAt,
+    comments: selected.comments,
+  };
+}
+
 type ReviewFlowController = {
   handleReviewCommand: (
+    args: string,
+    ctx: ExtensionCommandContext,
+  ) => Promise<void>;
+  handleReviewFixCommand: (
     args: string,
     ctx: ExtensionCommandContext,
   ) => Promise<void>;
@@ -127,18 +464,8 @@ type GetCommentsForRun = (
 ) => ReviewComment[];
 
 type ReviewFlowStateManager = {
-  startReviewRun: (
-    ctx: { hasUI: boolean },
-    state: {
-      runId: string;
-      originLeafId: string;
-      targetHint: string;
-      reviewPrompt: string;
-      originModelProvider: string;
-      originModelId: string;
-      originThinkingLevel: string;
-    },
-  ) => void;
+  startReviewRun: (ctx: { hasUI: boolean }, state: ReviewRunInfo) => void;
+  startFixRun?: (ctx: { hasUI: boolean }, state: ReviewFixRunInfo) => void;
   clearActiveRun: (ctx: { hasUI: boolean }) => void;
 };
 
@@ -168,34 +495,25 @@ type ReviewRunInfo = {
 };
 
 type ActiveReviewRun = ReviewRunInfo & {
+  kind: "review";
   commandCtx: ExtensionCommandContext;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+type ActiveFixRun = ReviewFixRunInfo & {
+  kind: "fix";
+  commandCtx: ExtensionCommandContext;
+  selectedComments: ReviewComment[];
+};
 
-function extractTextContent(content: unknown): string {
-  if (typeof content === "string") {
-    return content;
-  }
+const REVIEW_SUMMARY_ENTRY = "review";
+const REVIEW_FIX_SUMMARY_ENTRY = "review-fix";
 
-  if (!Array.isArray(content)) {
-    return "";
-  }
+type ActiveReviewRunState = ActiveReviewRun | ActiveFixRun;
 
-  return content
-    .map((block) => {
-      if (!isRecord(block) || block.type !== "text") {
-        return "";
-      }
-
-      return typeof block.text === "string" ? block.text : "";
-    })
-    .join("");
-}
-
-function agentEndMatchesRun(event: unknown, run: ActiveReviewRun): boolean {
+function agentEndMatchesRun(
+  event: unknown,
+  run: ActiveReviewRunState,
+): boolean {
   if (!isRecord(event) || !Array.isArray(event.messages)) {
     return false;
   }
@@ -234,106 +552,224 @@ function ensureOriginLeafId(
   return getLeafId(ctx);
 }
 
+function extractLabelPrefix(label: string): string | undefined {
+  if (label.startsWith("review-fix:")) {
+    return REVIEW_FIX_SUMMARY_ENTRY;
+  }
+
+  if (label.startsWith("review:")) {
+    return REVIEW_SUMMARY_ENTRY;
+  }
+
+  return undefined;
+}
+
 export function createReviewFlowController(
   dependencies: ReviewFlowDependencies,
 ): ReviewFlowController {
-  let activeRun: ActiveReviewRun | null = null;
-  const pendingSummaries = new Map<string, ReviewBranchSummary>();
+  let activeRun: ActiveReviewRunState | null = null;
+  const pendingSummaries = new Map<
+    string,
+    ReviewBranchSummary | FixBranchSummary
+  >();
+
+  async function handleReviewCommand(
+    args: string,
+    ctx: ExtensionCommandContext,
+  ) {
+    if (!ctx.hasUI) {
+      return;
+    }
+
+    const model = ctx.model;
+    if (model === undefined) {
+      ctx.ui.notify(
+        "Cannot start review: no active model is selected.",
+        "error",
+      );
+      return;
+    }
+
+    await ctx.waitForIdle();
+
+    let command: ReturnType<typeof parseReviewArgs>;
+    try {
+      command = parseReviewArgs(args);
+    } catch (error) {
+      ctx.ui.notify(
+        error instanceof Error
+          ? error.message
+          : "Cannot start review: invalid command arguments.",
+        "error",
+      );
+      return;
+    }
+
+    const originLeafId = ensureOriginLeafId(ctx, dependencies.pi);
+    if (originLeafId === null) {
+      ctx.ui.notify("Cannot start review: no current branch leaf id.", "error");
+      return;
+    }
+
+    let resolvedTarget: ResolvedReviewTarget;
+    try {
+      resolvedTarget = await dependencies.resolveTarget(command.target);
+    } catch (error) {
+      ctx.ui.notify(
+        error instanceof Error
+          ? error.message
+          : "Failed to resolve review target.",
+        "error",
+      );
+      return;
+    }
+
+    const thinkingLevel = dependencies.getThinkingLevel();
+    const draftRequest = dependencies.buildDraftRequest(resolvedTarget);
+    ctx.ui.notify("Generating review prompt draft…", "info");
+
+    const draft = await dependencies.generateDraft(draftRequest, {
+      model,
+      modelRegistry: ctx.modelRegistry,
+      thinkingLevel,
+      signal: ctx.signal,
+    });
+
+    if (!draft.ok) {
+      ctx.ui.notify(draft.error, "error");
+      return;
+    }
+
+    const editedPrompt = await ctx.ui.editor("Edit review prompt", draft.draft);
+    if (editedPrompt === undefined) {
+      ctx.ui.notify("Review cancelled before branch launch.", "info");
+      return;
+    }
+
+    const runInfo: ReviewRunInfo = {
+      runId: dependencies.createRunId(),
+      originLeafId,
+      targetHint: resolvedTarget.targetHint,
+      reviewPrompt: editedPrompt,
+      originModelProvider: model.provider,
+      originModelId: model.id,
+      originThinkingLevel: thinkingLevel,
+    };
+
+    dependencies.stateManager.startReviewRun(ctx, runInfo);
+    activeRun = { ...runInfo, kind: "review", commandCtx: ctx };
+
+    ctx.ui.notify(`Review branch started: ${runInfo.runId}`, "info");
+    dependencies.pi.sendUserMessage(editedPrompt);
+  }
+
+  async function startFixRunIfSupported(
+    ctx: ExtensionCommandContext,
+    runInfo: ReviewFixRunInfo,
+  ) {
+    if (dependencies.stateManager.startFixRun !== undefined) {
+      dependencies.stateManager.startFixRun(ctx, runInfo);
+      return;
+    }
+
+    dependencies.stateManager.startReviewRun(ctx, {
+      runId: runInfo.runId,
+      originLeafId: runInfo.originLeafId,
+      targetHint: runInfo.targetHint,
+      reviewPrompt: runInfo.reviewPrompt,
+      originModelProvider: runInfo.originModelProvider,
+      originModelId: runInfo.originModelId,
+      originThinkingLevel: runInfo.originThinkingLevel,
+    });
+  }
+
+  async function handleReviewFixCommand(
+    args: string,
+    ctx: ExtensionCommandContext,
+  ) {
+    if (!ctx.hasUI) {
+      return;
+    }
+
+    const model = ctx.model;
+    if (model === undefined) {
+      ctx.ui.notify(
+        "Cannot start review-fix: no active model is selected.",
+        "error",
+      );
+      return;
+    }
+
+    await ctx.waitForIdle();
+
+    let command: ReturnType<typeof parseReviewFixArgs>;
+    try {
+      command = parseReviewFixArgs(args);
+    } catch (error) {
+      ctx.ui.notify(
+        error instanceof Error ? error.message : "Cannot start review-fix.",
+        "error",
+      );
+      return;
+    }
+
+    const originLeafId = getLeafId(ctx);
+    if (originLeafId === null) {
+      ctx.ui.notify(
+        "Cannot start review-fix: no current branch leaf id.",
+        "error",
+      );
+      return;
+    }
+
+    const selectedSummary = selectReviewSummaryForFix(
+      ctx.sessionManager.getEntries(),
+      command.selector,
+    );
+
+    if (selectedSummary === undefined) {
+      ctx.ui.notify(
+        "Cannot start review-fix: no completed review with comments found.",
+        "error",
+      );
+      return;
+    }
+
+    const fixPrompt = buildReviewFixPrompt({
+      reviewRunId: selectedSummary.runId,
+      targetHint: selectedSummary.targetHint,
+      comments: selectedSummary.comments,
+    });
+
+    const thinkingLevel = dependencies.getThinkingLevel();
+    const fixRunInfo: ReviewFixRunInfo = {
+      runId: dependencies.createRunId(),
+      originLeafId,
+      targetHint: selectedSummary.targetHint,
+      reviewPrompt: fixPrompt,
+      originModelProvider: model.provider,
+      originModelId: model.id,
+      originThinkingLevel: thinkingLevel,
+      sourceReviewRunId: selectedSummary.runId,
+      commentIds: selectedSummary.comments.map((comment) => comment.id),
+    };
+
+    await startFixRunIfSupported(ctx, fixRunInfo);
+
+    activeRun = {
+      ...fixRunInfo,
+      kind: "fix",
+      commandCtx: ctx,
+      selectedComments: selectedSummary.comments,
+    };
+
+    ctx.ui.notify(`Fix branch started: ${fixRunInfo.runId}`, "info");
+    dependencies.pi.sendUserMessage(fixPrompt);
+  }
 
   return {
-    async handleReviewCommand(args, ctx): Promise<void> {
-      if (!ctx.hasUI) {
-        return;
-      }
-
-      const model = ctx.model;
-      if (model === undefined) {
-        ctx.ui.notify(
-          "Cannot start review: no active model is selected.",
-          "error",
-        );
-        return;
-      }
-
-      await ctx.waitForIdle();
-
-      let command: ReturnType<typeof parseReviewArgs>;
-      try {
-        command = parseReviewArgs(args);
-      } catch (error) {
-        ctx.ui.notify(
-          error instanceof Error
-            ? error.message
-            : "Cannot start review: invalid command arguments.",
-          "error",
-        );
-        return;
-      }
-
-      const originLeafId = ensureOriginLeafId(ctx, dependencies.pi);
-      if (originLeafId === null) {
-        ctx.ui.notify(
-          "Cannot start review: no current branch leaf id.",
-          "error",
-        );
-        return;
-      }
-
-      let resolvedTarget: ResolvedReviewTarget;
-      try {
-        resolvedTarget = await dependencies.resolveTarget(command.target);
-      } catch (error) {
-        ctx.ui.notify(
-          error instanceof Error
-            ? error.message
-            : "Failed to resolve review target.",
-          "error",
-        );
-        return;
-      }
-
-      const thinkingLevel = dependencies.getThinkingLevel();
-      const draftRequest = dependencies.buildDraftRequest(resolvedTarget);
-      ctx.ui.notify("Generating review prompt draft…", "info");
-
-      const draft = await dependencies.generateDraft(draftRequest, {
-        model,
-        modelRegistry: ctx.modelRegistry,
-        thinkingLevel,
-        signal: ctx.signal,
-      });
-
-      if (!draft.ok) {
-        ctx.ui.notify(draft.error, "error");
-        return;
-      }
-
-      const editedPrompt = await ctx.ui.editor(
-        "Edit review prompt",
-        draft.draft,
-      );
-      if (editedPrompt === undefined) {
-        ctx.ui.notify("Review cancelled before branch launch.", "info");
-        return;
-      }
-
-      const runInfo: ReviewRunInfo = {
-        runId: dependencies.createRunId(),
-        originLeafId,
-        targetHint: resolvedTarget.targetHint,
-        reviewPrompt: editedPrompt,
-        originModelProvider: model.provider,
-        originModelId: model.id,
-        originThinkingLevel: thinkingLevel,
-      };
-
-      dependencies.stateManager.startReviewRun(ctx, runInfo);
-      activeRun = { ...runInfo, commandCtx: ctx };
-
-      ctx.ui.notify(`Review branch started: ${runInfo.runId}`, "info");
-      dependencies.pi.sendUserMessage(editedPrompt);
-    },
-
+    handleReviewCommand,
+    handleReviewFixCommand,
     async handleAgentEnd(event, ctx): Promise<void> {
       if (activeRun === null) {
         return;
@@ -344,25 +780,47 @@ export function createReviewFlowController(
         return;
       }
 
-      const comments = dependencies.getCommentsForRun(
-        { sessionManager: ctx.sessionManager },
-        run.runId,
-      );
-      const summary = buildReviewBranchSummary({
-        runId: run.runId,
-        targetHint: run.targetHint,
-        reviewPrompt: run.reviewPrompt,
-        comments,
-        completedAt: dependencies.getNow(),
-      });
+      const comments =
+        run.kind === "review"
+          ? dependencies.getCommentsForRun(
+              { sessionManager: ctx.sessionManager },
+              run.runId,
+            )
+          : run.selectedComments;
+
+      let summary: ReviewBranchSummary | FixBranchSummary;
+      if (run.kind === "review") {
+        summary = buildReviewBranchSummary({
+          runId: run.runId,
+          targetHint: run.targetHint,
+          reviewPrompt: run.reviewPrompt,
+          comments,
+          completedAt: dependencies.getNow(),
+        });
+      } else {
+        summary = buildFixBranchSummary({
+          runId: run.runId,
+          sourceReviewRunId: run.sourceReviewRunId,
+          targetHint: run.targetHint,
+          fixPrompt: run.reviewPrompt,
+          comments: run.selectedComments,
+          agentSummary: extractAssistantSummary(event),
+          completedAt: dependencies.getNow(),
+        });
+      }
 
       pendingSummaries.set(run.runId, summary);
 
       let collapseResult: { cancelled: boolean };
+      const collapseLabel =
+        run.kind === "review"
+          ? `${REVIEW_SUMMARY_ENTRY}:${run.runId}`
+          : `${REVIEW_FIX_SUMMARY_ENTRY}:${run.runId}`;
+
       try {
         collapseResult = await run.commandCtx.navigateTree(run.originLeafId, {
           summarize: true,
-          label: `review:${run.runId}`,
+          label: collapseLabel,
         });
       } catch {
         return;
@@ -372,7 +830,12 @@ export function createReviewFlowController(
         return;
       }
 
-      dependencies.pi.appendEntry(REVIEW_SUMMARY_ENTRY_TYPE, summary);
+      const summaryEntryType =
+        run.kind === "review"
+          ? REVIEW_SUMMARY_ENTRY_TYPE
+          : REVIEW_FIX_SUMMARY_ENTRY_TYPE;
+
+      dependencies.pi.appendEntry(summaryEntryType, summary);
       activeRun = null;
       dependencies.stateManager.clearActiveRun(run.commandCtx);
     },
@@ -383,11 +846,16 @@ export function createReviewFlowController(
       }
 
       const label = event.preparation.label;
-      if (typeof label !== "string" || !label.startsWith("review:")) {
+      if (typeof label !== "string") {
         return undefined;
       }
 
-      const runId = label.slice("review:".length);
+      const prefix = extractLabelPrefix(label);
+      if (prefix === undefined) {
+        return undefined;
+      }
+
+      const runId = label.slice(`${prefix}:`.length);
       const summary = pendingSummaries.get(runId);
       if (summary === undefined) {
         return undefined;

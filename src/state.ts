@@ -3,6 +3,8 @@ import {
   REVIEW_STATE_VERSION,
   type ReviewActiveRunInfo,
   type ReviewActiveState,
+  type ReviewFixState,
+  type ReviewFixStateStart,
   type ReviewInactiveState,
   type ReviewState,
   type ReviewStateStart,
@@ -30,33 +32,55 @@ function readStateData(raw: unknown): ReviewState | undefined {
     return { version: REVIEW_STATE_VERSION, activeKind: null };
   }
 
-  if (raw.activeKind !== "review") {
+  if (raw.activeKind !== "review" && raw.activeKind !== "fix") {
     return undefined;
   }
 
   if (
-    hasString(raw, "runId") &&
-    hasString(raw, "originLeafId") &&
-    hasString(raw, "targetHint") &&
-    hasString(raw, "reviewPrompt") &&
-    hasString(raw, "originModelProvider") &&
-    hasString(raw, "originModelId") &&
-    hasString(raw, "originThinkingLevel")
+    !hasString(raw, "runId") ||
+    !hasString(raw, "originLeafId") ||
+    !hasString(raw, "targetHint") ||
+    !hasString(raw, "reviewPrompt") ||
+    !hasString(raw, "originModelProvider") ||
+    !hasString(raw, "originModelId") ||
+    !hasString(raw, "originThinkingLevel")
   ) {
-    return {
-      version: REVIEW_STATE_VERSION,
-      activeKind: "review",
-      runId: String(raw.runId),
-      originLeafId: String(raw.originLeafId),
-      targetHint: String(raw.targetHint),
-      reviewPrompt: String(raw.reviewPrompt),
-      originModelProvider: String(raw.originModelProvider),
-      originModelId: String(raw.originModelId),
-      originThinkingLevel: String(raw.originThinkingLevel),
-    };
+    return undefined;
   }
 
-  return undefined;
+  const baseState = {
+    version: REVIEW_STATE_VERSION,
+    runId: String(raw.runId),
+    originLeafId: String(raw.originLeafId),
+    targetHint: String(raw.targetHint),
+    reviewPrompt: String(raw.reviewPrompt),
+    originModelProvider: String(raw.originModelProvider),
+    originModelId: String(raw.originModelId),
+    originThinkingLevel: String(raw.originThinkingLevel),
+  };
+
+  if (raw.activeKind === "review") {
+    return { ...baseState, activeKind: "review" };
+  }
+
+  if (!hasString(raw, "sourceReviewRunId") || !Array.isArray(raw.commentIds)) {
+    return undefined;
+  }
+
+  const commentIds = raw.commentIds.filter(
+    (commentId): commentId is string =>
+      typeof commentId === "string" && commentId.length > 0,
+  );
+  if (commentIds.length !== raw.commentIds.length) {
+    return undefined;
+  }
+
+  return {
+    ...baseState,
+    activeKind: "fix",
+    sourceReviewRunId: String(raw.sourceReviewRunId),
+    commentIds,
+  };
 }
 
 export function createInactiveReviewState(): ReviewInactiveState {
@@ -107,6 +131,7 @@ export type ReviewStateRuntime = {
 export type ReviewStateManager = {
   getState: () => ReviewState;
   startReviewRun: (ctx: { hasUI: boolean }, state: ReviewStateStart) => void;
+  startFixRun: (ctx: { hasUI: boolean }, state: ReviewFixStateStart) => void;
   clearActiveRun: (ctx: { hasUI: boolean }) => void;
   refresh: (ctx: {
     hasUI: boolean;
@@ -129,6 +154,22 @@ function toReviewStateValue(
     originModelProvider: value.originModelProvider,
     originModelId: value.originModelId,
     originThinkingLevel: value.originThinkingLevel,
+  };
+}
+
+function toFixStateValue(value: ReviewFixStateStart): ReviewFixState {
+  return {
+    version: REVIEW_STATE_VERSION,
+    activeKind: "fix",
+    runId: value.runId,
+    originLeafId: value.originLeafId,
+    targetHint: value.targetHint,
+    reviewPrompt: value.reviewPrompt,
+    originModelProvider: value.originModelProvider,
+    originModelId: value.originModelId,
+    originThinkingLevel: value.originThinkingLevel,
+    sourceReviewRunId: value.sourceReviewRunId,
+    commentIds: [...value.commentIds],
   };
 }
 
@@ -164,6 +205,11 @@ export function createReviewStateManager(
     },
     startReviewRun(_ctx: { hasUI: boolean }, nextRun: ReviewStateStart): void {
       state = toReviewStateValue(nextRun);
+      runtime.appendEntry(REVIEW_STATE_ENTRY_TYPE, state);
+      syncTools(state);
+    },
+    startFixRun(_ctx: { hasUI: boolean }, nextRun: ReviewFixStateStart): void {
+      state = toFixStateValue(nextRun);
       runtime.appendEntry(REVIEW_STATE_ENTRY_TYPE, state);
       syncTools(state);
     },
