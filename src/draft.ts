@@ -66,18 +66,20 @@ export type GetApiKeyAndHeadersResult =
       headers?: Record<string, string>;
     };
 
-export interface ModelRegistryLike {
-  getApiKeyAndHeaders: (model: unknown) => Promise<GetApiKeyAndHeadersResult>;
+export interface ModelRegistryLike<TModel = unknown> {
+  getApiKeyAndHeaders: (model: TModel) => Promise<GetApiKeyAndHeadersResult>;
 }
 
 export interface GenerateReviewPromptDraftContext {
   completeDraft: CompleteReviewDraft;
 }
 
-export interface CompleteReviewPromptDraftWithPiAiOptions {
+export interface CompleteReviewPromptDraftWithPiAiOptions<
+  TModel extends { provider: string } = { provider: string },
+> {
   request: ReviewPromptDraftRequest;
-  model: { provider: string };
-  modelRegistry: ModelRegistryLike;
+  model: TModel;
+  modelRegistry: ModelRegistryLike<TModel>;
   thinkingLevel: PiReviewThinkingLevel;
   signal?: AbortSignal;
   complete?: CompleteWithModel;
@@ -164,8 +166,10 @@ export async function generateReviewPromptDraft(
   }
 }
 
-export async function completeReviewPromptDraftWithPiAi(
-  options: CompleteReviewPromptDraftWithPiAiOptions,
+export async function completeReviewPromptDraftWithPiAi<
+  TModel extends { provider: string },
+>(
+  options: CompleteReviewPromptDraftWithPiAiOptions<TModel>,
 ): Promise<DraftCompletion> {
   const {
     request,

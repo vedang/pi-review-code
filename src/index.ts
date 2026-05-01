@@ -3,16 +3,26 @@ import type {
   ExtensionCommandContext,
 } from "@mariozechner/pi-coding-agent";
 
-import { registerAddReviewCommentTool } from "./comments";
-import { createReviewStateManager } from "./state";
+import {
+  getReviewCommentsForRun,
+  registerAddReviewCommentTool,
+} from "./comments";
+import {
+  type PiReviewThinkingLevel,
+  completeReviewPromptDraftWithPiAi,
+  generateReviewPromptDraft,
+} from "./draft";
+import { createReviewFlowController } from "./flow";
+import { buildReviewPromptDraftRequest } from "./prompts";
+import { type ReviewStateManager, createReviewStateManager } from "./state";
+import { resolveReviewTarget } from "./targets";
 
 export const REVIEW_HELP_TEXT = [
-  "pi-review-code scaffold is installed.",
-  "Planned usage:",
+  "pi-review-code review flow is installed.",
+  "Usage:",
   "- /review diff-against <ref>",
   "- /review prompt <review request>",
-  "- /review pr <url-or-ref>",
-  "Full review branch lifecycle will be added in later iterations.",
+  "- /review pr <url-or-ref> (coming in next iteration)",
 ].join("\n");
 
 export const REVIEW_FIX_HELP_TEXT = [
@@ -26,7 +36,7 @@ export const REVIEW_FIX_HELP_TEXT = [
 
 type ReviewRuntimeMethods = Pick<
   ExtensionAPI,
-  "registerTool" | "appendEntry" | "getActiveTools" | "setActiveTools"
+  "appendEntry" | "getActiveTools" | "registerTool" | "setActiveTools"
 >;
 
 type ReviewRuntimeAPI = ExtensionAPI & ReviewRuntimeMethods;
@@ -42,9 +52,11 @@ function isReviewRuntime(pi: ExtensionAPI): pi is ReviewRuntimeAPI {
   );
 }
 
-function registerReviewRuntimeHelpers(pi: ExtensionAPI): void {
+function registerReviewRuntimeHelpers(
+  pi: ExtensionAPI,
+): ReviewStateManager | null {
   if (!isReviewRuntime(pi)) {
-    return;
+    return null;
   }
 
   const stateManager = createReviewStateManager(pi);
@@ -54,6 +66,8 @@ function registerReviewRuntimeHelpers(pi: ExtensionAPI): void {
     createId: () => crypto.randomUUID(),
     now: () => Date.now(),
   });
+
+  return stateManager;
 }
 
 function registerInfoCommand(
@@ -75,16 +89,78 @@ function registerInfoCommand(
 export default function reviewCodeExtension(pi: ExtensionAPI): void {
   registerInfoCommand(
     pi,
-    "review",
-    "Start a context-rich code review",
-    REVIEW_HELP_TEXT,
-  );
-  registerInfoCommand(
-    pi,
     "review-fix",
     "Fix findings from a recent pi-review-code run",
     REVIEW_FIX_HELP_TEXT,
   );
 
-  registerReviewRuntimeHelpers(pi);
+  const stateManager = registerReviewRuntimeHelpers(pi);
+
+  if (stateManager === null) {
+    registerInfoCommand(
+      pi,
+      "review",
+      "Start a context-rich code review",
+      REVIEW_HELP_TEXT,
+    );
+    return;
+  }
+
+  const controller = createReviewFlowController({
+    pi: {
+      appendEntry: (customType, data) => pi.appendEntry(customType, data),
+      sendMessage: (message) => pi.sendMessage(message),
+      sendUserMessage: (message) => pi.sendUserMessage(message),
+    },
+    stateManager,
+    resolveTarget: (target) =>
+      resolveReviewTarget(target, {
+        exec: async (command, args) => {
+          const result = await pi.exec(command, args);
+          return {
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exitCode: result.code,
+          };
+        },
+      }),
+    buildDraftRequest: buildReviewPromptDraftRequest,
+    generateDraft: (request, context) =>
+      generateReviewPromptDraft(request, {
+        completeDraft: (draftRequest) =>
+          completeReviewPromptDraftWithPiAi({
+            request: draftRequest,
+            model: context.model,
+            modelRegistry: context.modelRegistry,
+            thinkingLevel: context.thinkingLevel,
+            signal: context.signal,
+          }),
+      }),
+    getCommentsForRun: (context, runId) =>
+      getReviewCommentsForRun(context, runId),
+    createRunId: () => crypto.randomUUID(),
+    getNow: () => Date.now(),
+    getThinkingLevel: () => pi.getThinkingLevel() as PiReviewThinkingLevel,
+  });
+
+  pi.on("agent_end", (event, ctx) => controller.handleAgentEnd(event, ctx));
+  pi.on("session_before_tree", (event) =>
+    controller.handleSessionBeforeTree(event),
+  );
+
+  pi.registerCommand("review", {
+    description: "Start a context-rich code review",
+    handler: async (args, ctx) => {
+      if (!ctx.hasUI) {
+        return;
+      }
+
+      if (args.trim().length === 0) {
+        ctx.ui.notify(REVIEW_HELP_TEXT, "info");
+        return;
+      }
+
+      await controller.handleReviewCommand(args, ctx);
+    },
+  });
 }
