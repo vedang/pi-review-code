@@ -5,7 +5,6 @@ SHELL := /bin/bash
 
 TS_SCOPE ?= src __tests__ package.json tsconfig.json biome.json knip.json vitest.config.unit.ts vitest.config.integration.ts vitest.config.llm.ts .jscpd.json
 TEST_FILES := $(shell find __tests__ -type f -name "*.test.ts" 2>/dev/null)
-TEST_FILES_UNIT := $(TEST_FILES)
 TEST_FILES_INTEGRATION := $(shell find __tests__/integration -type f -name "*.test.ts" 2>/dev/null)
 TEST_FILES_LLM := $(shell find __tests__/llm -type f -name "*.test.ts" 2>/dev/null)
 
@@ -63,8 +62,8 @@ format: ## Format project files with Biome
 
 .PHONY: test-unit
 test-unit:
-	@if [ -n "$(strip $(TEST_FILES_UNIT))" ]; then \
-		bun test $(TEST_FILES_UNIT); \
+	@if [ -n "$(strip $(TEST_FILES))" ]; then \
+		bun test $(TEST_FILES); \
 	else \
 		echo "No unit tests found under __tests__; skipping"; \
 	fi

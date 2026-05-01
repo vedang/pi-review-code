@@ -14,11 +14,7 @@ import reviewCodeExtension, {
 
 type Harness = ReturnType<typeof createHarness>;
 
-function createHarness(): {
-  commands: Map<string, RegisteredCommand["handler"]>;
-  notifications: Array<{ message: string; level: string }>;
-  ctx: ExtensionCommandContext;
-} {
+function createHarness() {
   const commands = new Map<string, RegisteredCommand["handler"]>();
   const notifications: Array<{ message: string; level: string }> = [];
 

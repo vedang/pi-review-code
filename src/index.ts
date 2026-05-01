@@ -21,26 +21,33 @@ export const REVIEW_FIX_HELP_TEXT = [
   "Review comment selection and fix branch lifecycle will be added later.",
 ].join("\n");
 
-function notifyInfo(ctx: ExtensionCommandContext, message: string): void {
-  if (!ctx.hasUI) {
-    return;
-  }
-
-  ctx.ui.notify(message, "info");
+function registerInfoCommand(
+  pi: ExtensionAPI,
+  name: string,
+  description: string,
+  message: string,
+): void {
+  pi.registerCommand(name, {
+    description,
+    handler: async (_args, ctx: ExtensionCommandContext) => {
+      if (ctx.hasUI) {
+        ctx.ui.notify(message, "info");
+      }
+    },
+  });
 }
 
 export default function reviewCodeExtension(pi: ExtensionAPI): void {
-  pi.registerCommand("review", {
-    description: "Start a context-rich code review",
-    handler: async (_args, ctx) => {
-      notifyInfo(ctx, REVIEW_HELP_TEXT);
-    },
-  });
-
-  pi.registerCommand("review-fix", {
-    description: "Fix findings from a recent pi-review-code run",
-    handler: async (_args, ctx) => {
-      notifyInfo(ctx, REVIEW_FIX_HELP_TEXT);
-    },
-  });
+  registerInfoCommand(
+    pi,
+    "review",
+    "Start a context-rich code review",
+    REVIEW_HELP_TEXT,
+  );
+  registerInfoCommand(
+    pi,
+    "review-fix",
+    "Fix findings from a recent pi-review-code run",
+    REVIEW_FIX_HELP_TEXT,
+  );
 }
