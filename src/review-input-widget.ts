@@ -5,15 +5,21 @@ import type {
 import {
   type Component,
   Editor,
-  type EditorTheme,
   type Focusable,
   Key,
   type TUI,
   matchesKey,
-  truncateToWidth,
-  visibleWidth,
-  wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
+
+import {
+  type SubmitCancelAction,
+  type WidgetLineAppender,
+  createWidgetEditorTheme,
+  createWidgetRenderHelpers,
+  handleSubmitCancelActionInput,
+  nextItem,
+  renderSubmitCancelAction,
+} from "./widget-utils.js";
 
 export type ReviewInputKind = "review" | "diff-against" | "pr";
 
@@ -44,10 +50,8 @@ export type ReviewInputWidgetComponentOptions = {
 };
 
 type ActiveField = "primary" | "context" | "actions";
-type FormAction = "submit" | "cancel";
 
 const ACTIVE_FIELDS: ActiveField[] = ["primary", "context", "actions"];
-const ACTIONS: FormAction[] = ["submit", "cancel"];
 
 const DEFAULT_PRIMARY_LABEL = "what do I review?";
 const REVIEW_INPUT_KEY_HINT =
@@ -75,30 +79,11 @@ export function normalizeReviewInput(
   };
 }
 
-function createEditorTheme(theme: Theme): EditorTheme {
-  return {
-    borderColor: (text) => theme.fg("borderMuted", text),
-    selectList: {
-      selectedPrefix: (text) => theme.fg("accent", text),
-      selectedText: (text) => theme.fg("accent", text),
-      description: (text) => theme.fg("muted", text),
-      scrollInfo: (text) => theme.fg("dim", text),
-      noMatch: (text) => theme.fg("warning", text),
-    },
-  };
-}
-
-function nextItem<T>(items: readonly T[], current: T, direction: -1 | 1): T {
-  const currentIndex = items.indexOf(current);
-  const nextIndex = (currentIndex + direction + items.length) % items.length;
-  return items[nextIndex] ?? current;
-}
-
 class ReviewInputWidgetComponent implements Component, Focusable {
   private readonly primaryEditor: Editor;
   private readonly contextEditor: Editor;
   private activeField: ActiveField = "primary";
-  private selectedAction: FormAction = "submit";
+  private selectedAction: SubmitCancelAction = "submit";
   private validationMessage: string | undefined;
   private isDone = false;
   private isFocused = false;
@@ -109,7 +94,7 @@ class ReviewInputWidgetComponent implements Component, Focusable {
     private readonly config: ReviewInputWidgetConfig,
     private readonly done: (result: ReviewInputWidgetResult) => void,
   ) {
-    const editorTheme = createEditorTheme(theme);
+    const editorTheme = createWidgetEditorTheme(theme);
     this.primaryEditor = new Editor(tui, editorTheme, { paddingX: 1 });
     this.contextEditor = new Editor(tui, editorTheme, { paddingX: 1 });
     this.primaryEditor.setText(config.initialPrimaryValue ?? "");
@@ -177,90 +162,52 @@ class ReviewInputWidgetComponent implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    const safeWidth = Math.max(1, Math.floor(width));
-    const editorWidth = Math.max(1, safeWidth - 2);
+    const render = createWidgetRenderHelpers(width);
     this.updateEditorBorders();
 
-    const lines: string[] = [];
-    const addLine = (line = "") => {
-      lines.push(truncateToWidth(line, safeWidth, ""));
-    };
-    const addWrapped = (text: string, prefix = "") => {
-      const bodyWidth = Math.max(1, safeWidth - visibleWidth(prefix));
-      for (const rawLine of text.split("\n")) {
-        const wrappedLines = wrapTextWithAnsi(rawLine, bodyWidth);
-        if (wrappedLines.length === 0) {
-          addLine(prefix);
-          continue;
-        }
-        for (const wrappedLine of wrappedLines) {
-          addLine(`${prefix}${wrappedLine}`);
-        }
-      }
-    };
-    const addEditor = (editor: Editor) => {
-      for (const editorLine of editor.render(editorWidth)) {
-        addLine(` ${editorLine}`);
-      }
-    };
-
-    addLine(this.theme.fg("borderAccent", "─".repeat(safeWidth)));
-    addWrapped(this.theme.fg("accent", this.theme.bold(this.config.title)));
-    addWrapped(this.theme.fg("muted", this.config.helpText));
-    addLine();
-
-    this.renderFieldHeader(
-      lines,
-      safeWidth,
-      "primary",
-      this.config.primaryLabel,
+    render.addLine(this.theme.fg("borderAccent", "─".repeat(render.safeWidth)));
+    render.addWrapped(
+      this.theme.fg("accent", this.theme.bold(this.config.title)),
     );
+    render.addWrapped(this.theme.fg("muted", this.config.helpText));
+    render.addLine();
+
+    this.renderFieldHeader(render.addLine, "primary", this.config.primaryLabel);
     if (this.primaryEditor.getText().trim().length === 0) {
-      addWrapped(this.theme.fg("dim", this.config.primaryPlaceholder), "  ");
+      render.addWrapped(
+        this.theme.fg("dim", this.config.primaryPlaceholder),
+        "  ",
+      );
     }
-    addEditor(this.primaryEditor);
+    render.addEditor(this.primaryEditor);
 
-    this.renderFieldHeader(
-      lines,
-      safeWidth,
-      "context",
-      this.config.contextLabel,
-    );
-    addEditor(this.contextEditor);
+    this.renderFieldHeader(render.addLine, "context", this.config.contextLabel);
+    render.addEditor(this.contextEditor);
 
     if (this.validationMessage !== undefined) {
-      addLine();
-      addWrapped(this.theme.fg("error", `! ${this.validationMessage}`));
+      render.addLine();
+      render.addWrapped(this.theme.fg("error", `! ${this.validationMessage}`));
     }
 
-    addLine();
-    this.renderActions(lines, safeWidth);
-    addWrapped(this.theme.fg("dim", REVIEW_INPUT_KEY_HINT));
-    addLine(this.theme.fg("borderAccent", "─".repeat(safeWidth)));
+    render.addLine();
+    this.renderActions(render.addLine);
+    render.addWrapped(this.theme.fg("dim", REVIEW_INPUT_KEY_HINT));
+    render.addLine(this.theme.fg("borderAccent", "─".repeat(render.safeWidth)));
 
-    return lines;
+    return render.lines;
   }
 
   private handleActionInput(data: string): void {
-    if (matchesKey(data, Key.left)) {
-      this.selectedAction = nextItem(ACTIONS, this.selectedAction, -1);
-      this.requestRender();
-      return;
-    }
-
-    if (matchesKey(data, Key.right)) {
-      this.selectedAction = nextItem(ACTIONS, this.selectedAction, 1);
-      this.requestRender();
-      return;
-    }
-
-    if (matchesKey(data, Key.enter)) {
-      if (this.selectedAction === "submit") {
-        this.submit();
-      } else {
-        this.cancel();
-      }
-    }
+    handleSubmitCancelActionInput({
+      data,
+      selectedAction: this.selectedAction,
+      setSelectedAction: (action) => {
+        this.selectedAction = action;
+      },
+      submit: () => this.submit(),
+      cancel: () => this.cancel(),
+      requestRender: () => this.requestRender(),
+    });
   }
 
   private handleEditorChange(): void {
@@ -269,8 +216,7 @@ class ReviewInputWidgetComponent implements Component, Focusable {
   }
 
   private renderFieldHeader(
-    lines: string[],
-    width: number,
+    addLine: WidgetLineAppender,
     field: Exclude<ActiveField, "actions">,
     label: string,
   ): void {
@@ -278,25 +224,30 @@ class ReviewInputWidgetComponent implements Component, Focusable {
     const marker = isActive ? this.theme.fg("accent", "▶") : " ";
     const requiredText =
       field === "primary" ? this.theme.fg("warning", " required") : "";
-    lines.push(truncateToWidth(`${marker} ${label}${requiredText}`, width, ""));
+    addLine(`${marker} ${label}${requiredText}`);
   }
 
-  private renderActions(lines: string[], width: number): void {
+  private renderActions(addLine: WidgetLineAppender): void {
     const marker =
       this.activeField === "actions" ? this.theme.fg("accent", "▶") : " ";
-    const submit = this.renderAction("submit", "Submit");
-    const cancel = this.renderAction("cancel", "Cancel");
-    lines.push(truncateToWidth(`${marker} ${submit}  ${cancel}`, width, ""));
-  }
-
-  private renderAction(action: FormAction, label: string): string {
-    const text = ` ${label} `;
-    if (this.activeField === "actions" && this.selectedAction === action) {
-      return this.theme.bg("selectedBg", this.theme.fg("text", text));
-    }
-
-    const color = action === "submit" ? "success" : "muted";
-    return this.theme.fg(color, text);
+    const active = this.activeField === "actions";
+    const submit = renderSubmitCancelAction({
+      theme: this.theme,
+      action: "submit",
+      selectedAction: this.selectedAction,
+      active,
+      submitLabel: "Submit",
+      cancelLabel: "Cancel",
+    });
+    const cancel = renderSubmitCancelAction({
+      theme: this.theme,
+      action: "cancel",
+      selectedAction: this.selectedAction,
+      active,
+      submitLabel: "Submit",
+      cancelLabel: "Cancel",
+    });
+    addLine(`${marker} ${submit}  ${cancel}`);
   }
 
   private setActiveField(field: ActiveField): void {
