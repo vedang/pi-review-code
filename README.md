@@ -31,21 +31,11 @@ Open a review input form for a free-form aspect of the codebase:
 
 The form asks what to review and accepts optional context. Typed arguments prefill the required field so you can submit quickly or add context before prompt drafting.
 
-### `/review-fix [list|latest|<review-run-id>|<finding-id>]`
+### `/review-fix`
 
-Start a same-session fix branch for review comments, or omit arguments for usage help:
+Open a finding-selection widget for the latest completed review run. Select one or more findings, optionally add fix context, then start a same-session fix branch.
 
-```text
-/review-fix                                      # show help
-/review-fix latest                               # latest completed review
-/review-fix list                                 # unfixed findings
-/review-fix run <review-run-id>                  # specific review run
-/review-fix finding <finding-id>                 # one finding
-/review-fix finding <finding-id> <finding-id>    # multiple findings from one review
-/review-fix <id>                                 # finding first, then review run
-```
-
-The fix prompt lists selected comments with priorities and references. The fix branch collapses back with a summary of attempted fixes.
+The fix prompt lists selected comments with priorities, references, and optional fix context. The fix branch collapses back with a summary of attempted fixes.
 
 ### `/review-diff-against [ref]`
 
@@ -81,7 +71,7 @@ The form asks for `pr:` and accepts optional context. Typed selectors prefill th
 6. On submit, Pi starts a review branch with `add_review_comment` enabled.
 7. Review agent records actionable findings with `add_review_comment`.
 8. On agent completion, branch collapses back with a custom summary.
-9. `/review-fix` can use the persisted summary to launch a fix branch.
+9. `/review-fix` opens a checkbox widget using persisted review findings and starts a fix branch for selected findings.
 
 ## UI
 

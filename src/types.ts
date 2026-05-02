@@ -29,52 +29,6 @@ export type ReviewCommand = {
   target: ReviewTarget;
 };
 
-export type ReviewFixHelpSelector = {
-  kind: "help";
-};
-
-export type ReviewFixListSelector = {
-  kind: "list";
-};
-
-export type ReviewFixLatestSelector = {
-  kind: "latest";
-};
-
-export type ReviewFixRunIdSelector = {
-  kind: "run-id";
-  runId: string;
-};
-
-export type ReviewFixFindingIdSelector = {
-  kind: "finding-id";
-  findingId: string;
-};
-
-export type ReviewFixFindingIdsSelector = {
-  kind: "finding-ids";
-  findingIds: string[];
-};
-
-export type ReviewFixIdSelector = {
-  kind: "id";
-  id: string;
-};
-
-export type ReviewFixSelector =
-  | ReviewFixHelpSelector
-  | ReviewFixListSelector
-  | ReviewFixLatestSelector
-  | ReviewFixRunIdSelector
-  | ReviewFixFindingIdSelector
-  | ReviewFixFindingIdsSelector
-  | ReviewFixIdSelector;
-
-export type ReviewFixCommand = {
-  kind: "review-fix";
-  selector: ReviewFixSelector;
-};
-
 export const REVIEW_STATE_VERSION = 1 as const;
 export const REVIEW_STATE_ENTRY_TYPE = "pi-review-code:state";
 export const REVIEW_COMMENT_ENTRY_TYPE = "pi-review-code:comment";

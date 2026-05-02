@@ -36,7 +36,6 @@ import {
   type ResolvedReviewTarget,
   type ReviewComment,
   type ReviewFixRunInfo,
-  type ReviewFixSelector,
   type ReviewTarget,
 } from "./types.js";
 
@@ -116,13 +115,6 @@ export type ReviewSummaryForFix = {
   reviewPrompt: string;
   completedAt: number;
   comments: ReviewComment[];
-};
-
-export type ReviewFindingForFixList = {
-  reviewRunId: string;
-  targetHint: string;
-  completedAt: number;
-  comment: ReviewComment;
 };
 
 export type ReviewFixWidgetFinding = {
@@ -344,61 +336,6 @@ export function buildFixBranchSummary(
       ...fixContextDetails,
     },
   };
-}
-
-function formatUnfixedReviewFindingsText({
-  totalFindings,
-  unfixed,
-}: {
-  totalFindings: number;
-  unfixed: ReviewFindingForFixList[];
-}): string {
-  if (totalFindings === 0) {
-    return "No review findings found.";
-  }
-
-  if (unfixed.length === 0) {
-    return "All review findings have been fixed.";
-  }
-
-  const findingsByRun = new Map<string, ReviewFindingForFixList[]>();
-
-  for (const finding of unfixed) {
-    const key = finding.reviewRunId;
-    const bucket = findingsByRun.get(key);
-    if (bucket === undefined) {
-      findingsByRun.set(key, [finding]);
-    } else {
-      bucket.push(finding);
-    }
-  }
-
-  const lines = ["Unfixed review findings:", ""];
-
-  for (const [reviewRunId, findings] of findingsByRun) {
-    lines.push(`Review ${reviewRunId}`);
-    if (findings.length === 0) {
-      continue;
-    }
-
-    lines.push(`Target: ${findings[0]?.targetHint ?? ""}`);
-
-    for (const finding of findings) {
-      const referenceText =
-        finding.comment.references.length === 0
-          ? ""
-          : ` (${finding.comment.references.map(formatReference).join(", ")})`;
-      lines.push(
-        `- ${finding.comment.priority} ${finding.comment.id} (${reviewRunId}:${finding.comment.id})${referenceText}: ${finding.comment.comment}`,
-      );
-    }
-
-    lines.push("");
-  }
-
-  lines.push("Use /review-fix finding <finding-id> [<finding-id> ...]");
-
-  return lines.join("\n").trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -681,178 +618,8 @@ function chooseLatestReviewSummary(
   return a.order > b.order ? a : b;
 }
 
-function firstCommentForFindingId(
-  summary: ParsedReviewSummaryForFix,
-  findingId: string,
-): ReviewComment | undefined {
-  return summary.comments.find((comment) => comment.id === findingId);
-}
-
 function reviewFindingKey(reviewRunId: string, findingId: string): string {
   return `${reviewRunId}:${findingId}`;
-}
-
-export function listUnfixedReviewFindings(entries: unknown[]): {
-  totalFindings: number;
-  unfixed: ReviewFindingForFixList[];
-} {
-  const reviewsByRunId = new Map<string, ParsedReviewSummaryForFix>();
-  const fixedFindingKeys = new Set<string>();
-
-  for (let index = 0; index < entries.length; index += 1) {
-    const review = parseReviewSummaryForFixEntry(entries[index], index);
-    if (review !== undefined) {
-      const existing = reviewsByRunId.get(review.runId);
-      reviewsByRunId.set(
-        review.runId,
-        existing === undefined
-          ? review
-          : chooseLatestReviewSummary(review, existing),
-      );
-      continue;
-    }
-
-    const fix = parseFixSummaryForFixEntry(entries[index], index);
-    if (fix === undefined) {
-      continue;
-    }
-
-    for (const commentId of fix.commentIds) {
-      fixedFindingKeys.add(reviewFindingKey(fix.sourceReviewRunId, commentId));
-    }
-  }
-
-  const reviews = Array.from(reviewsByRunId.values()).sort((a, b) => {
-    if (a.completedAt !== b.completedAt) {
-      return b.completedAt - a.completedAt;
-    }
-
-    return b.order - a.order;
-  });
-
-  const totalFindings = reviews.reduce(
-    (count, review) => count + review.comments.length,
-    0,
-  );
-  const unfixed: ReviewFindingForFixList[] = [];
-
-  for (const review of reviews) {
-    for (const comment of review.comments) {
-      if (fixedFindingKeys.has(reviewFindingKey(review.runId, comment.id))) {
-        continue;
-      }
-
-      unfixed.push({
-        reviewRunId: review.runId,
-        targetHint: review.targetHint,
-        completedAt: review.completedAt,
-        comment,
-      });
-    }
-  }
-
-  return { totalFindings, unfixed };
-}
-
-export function selectReviewSummaryForFix(
-  entries: unknown[],
-  selector: ReviewFixSelector,
-): ReviewSummaryForFix | undefined {
-  if (selector.kind === "help") {
-    return undefined;
-  }
-
-  const findingCandidates: ParsedReviewSummaryForFix[] = [];
-  const candidates: ParsedReviewSummaryForFix[] = [];
-
-  for (let index = 0; index < entries.length; index += 1) {
-    const parsed = parseReviewSummaryForFixEntry(entries[index], index);
-    if (parsed === undefined) {
-      continue;
-    }
-
-    if (parsed.comments.length === 0) {
-      continue;
-    }
-
-    switch (selector.kind) {
-      case "latest":
-        candidates.push(parsed);
-        break;
-
-      case "run-id":
-        if (parsed.runId === selector.runId) {
-          candidates.push(parsed);
-        }
-        break;
-
-      case "finding-id": {
-        const finding = firstCommentForFindingId(parsed, selector.findingId);
-        if (finding === undefined) {
-          break;
-        }
-
-        candidates.push({ ...parsed, comments: [finding] });
-        break;
-      }
-
-      case "list":
-        break;
-
-      case "finding-ids": {
-        const findingComments: ReviewComment[] = [];
-        let hasAllFindings = selector.findingIds.length > 0;
-
-        for (const findingId of selector.findingIds) {
-          const finding = firstCommentForFindingId(parsed, findingId);
-          if (finding === undefined) {
-            hasAllFindings = false;
-            break;
-          }
-          findingComments.push(finding);
-        }
-
-        if (hasAllFindings) {
-          candidates.push({ ...parsed, comments: findingComments });
-        }
-        break;
-      }
-
-      default: {
-        const finding = firstCommentForFindingId(parsed, selector.id);
-        if (finding !== undefined) {
-          findingCandidates.push({ ...parsed, comments: [finding] });
-          break;
-        }
-
-        if (parsed.runId === selector.id) {
-          candidates.push(parsed);
-        }
-      }
-    }
-  }
-
-  const selectedCandidates =
-    selector.kind === "id" && findingCandidates.length > 0
-      ? findingCandidates
-      : candidates;
-
-  if (selectedCandidates.length === 0) {
-    return undefined;
-  }
-
-  const selected = selectedCandidates.reduce(
-    (best, candidate) => chooseLatestReviewSummary(candidate, best),
-    selectedCandidates[0],
-  );
-
-  return {
-    runId: selected.runId,
-    targetHint: selected.targetHint,
-    reviewPrompt: selected.reviewPrompt,
-    completedAt: selected.completedAt,
-    comments: selected.comments,
-  };
 }
 
 export function buildReviewFixWidgetData(

@@ -11,7 +11,6 @@ import {
   buildReviewPrCommandFromInput,
   parseReviewArgs,
   parseReviewDiffAgainstArgs,
-  parseReviewFixArgs,
   parseReviewPrArgs,
 } from "../src/command.js";
 
@@ -36,13 +35,15 @@ function reviewPrCommand(selector: string) {
   };
 }
 
-function reviewFixCommand(selector: unknown) {
-  return { kind: "review-fix", selector };
-}
-
 function assertUsageContains(usage: string, patterns: RegExp[]): void {
   for (const pattern of patterns) {
     assert.match(usage, pattern);
+  }
+}
+
+function assertUsageExcludes(usage: string, patterns: RegExp[]): void {
+  for (const pattern of patterns) {
+    assert.doesNotMatch(usage, pattern);
   }
 }
 
@@ -195,16 +196,21 @@ for (const testCase of singleTargetCommandCases) {
   });
 }
 
-test("review-specific usage constants mention renamed commands", () => {
+test("review-specific usage constants mention only supported commands", () => {
   assertUsageContains(REVIEW_USAGE, [
     /\/review <review request>/,
     /\/review-diff-against <ref>/,
     /\/review-pr <github-url\|gitlab-url\|github-number>/,
-    /\/review-fix \[list\|latest\|<review-run-id>\|<finding-id>\]/,
+    /\/review-fix$/m,
   ]);
-  assertUsageContains(REVIEW_FIX_USAGE, [
-    /\/review-fix list/,
-    /\/review-fix finding <finding-id> \[<finding-id> \.\.\.\]/,
+  assertUsageContains(REVIEW_FIX_USAGE, [/\/review-fix$/m]);
+  assertUsageExcludes(`${REVIEW_USAGE}\n${REVIEW_FIX_USAGE}`, [
+    /\/review-fix .*list/,
+    /\/review-fix .*latest/,
+    /\/review-fix .*run/,
+    /\/review-fix .*finding/,
+    /<review-run-id>/,
+    /<finding-id>/,
   ]);
   assertUsageContains(REVIEW_DIFF_AGAINST_USAGE, [
     /\/review-diff-against <ref>/,
@@ -225,65 +231,4 @@ test("rejects unterminated quotes", () => {
       new Error("Unterminated quote in command arguments."),
     );
   }
-});
-
-test("parses /review-fix selectors", () => {
-  const cases = [
-    ["", { kind: "help" }],
-    ["latest", { kind: "latest" }],
-    ["list", { kind: "list" }],
-    ["rev_20260501_abc", { kind: "id", id: "rev_20260501_abc" }],
-    ['"finding id"', { kind: "id", id: "finding id" }],
-    ["run rev_20260501_abc", { kind: "run-id", runId: "rev_20260501_abc" }],
-    ["finding 5044ff4b", { kind: "finding-id", findingId: "5044ff4b" }],
-    [
-      "finding finding-a finding-b",
-      { kind: "finding-ids", findingIds: ["finding-a", "finding-b"] },
-    ],
-    [
-      "finding finding-a,finding-b",
-      { kind: "finding-ids", findingIds: ["finding-a", "finding-b"] },
-    ],
-    [
-      "finding finding-a, finding-b",
-      { kind: "finding-ids", findingIds: ["finding-a", "finding-b"] },
-    ],
-    [
-      "finding finding-a finding-a finding-b",
-      { kind: "finding-ids", findingIds: ["finding-a", "finding-b"] },
-    ],
-    [
-      "finding finding-a finding-a",
-      { kind: "finding-ids", findingIds: ["finding-a"] },
-    ],
-  ] as const;
-
-  for (const [input, selector] of cases) {
-    assert.deepEqual(parseReviewFixArgs(input), reviewFixCommand(selector));
-  }
-});
-
-test("rejects invalid /review-fix selectors", () => {
-  assert.throws(() => parseReviewFixArgs('""'), new Error(REVIEW_FIX_USAGE));
-  assert.throws(() => parseReviewFixArgs("run"), new Error(REVIEW_FIX_USAGE));
-  assert.throws(
-    () => parseReviewFixArgs("finding"),
-    new Error(REVIEW_FIX_USAGE),
-  );
-  assert.throws(
-    () => parseReviewFixArgs("one two"),
-    new Error(REVIEW_FIX_USAGE),
-  );
-  assert.throws(
-    () => parseReviewFixArgs("finding ,"),
-    new Error(REVIEW_FIX_USAGE),
-  );
-  assert.throws(
-    () => parseReviewFixArgs("finding finding-a,,finding-b"),
-    new Error(REVIEW_FIX_USAGE),
-  );
-  assert.throws(
-    () => parseReviewFixArgs("finding finding-a,"),
-    new Error(REVIEW_FIX_USAGE),
-  );
 });
