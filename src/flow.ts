@@ -213,6 +213,61 @@ export function buildFixBranchSummary(
   };
 }
 
+function formatUnfixedReviewFindingsText({
+  totalFindings,
+  unfixed,
+}: {
+  totalFindings: number;
+  unfixed: ReviewFindingForFixList[];
+}): string {
+  if (totalFindings === 0) {
+    return "No review findings found.";
+  }
+
+  if (unfixed.length === 0) {
+    return "All review findings have been fixed.";
+  }
+
+  const findingsByRun = new Map<string, ReviewFindingForFixList[]>();
+
+  for (const finding of unfixed) {
+    const key = finding.reviewRunId;
+    const bucket = findingsByRun.get(key);
+    if (bucket === undefined) {
+      findingsByRun.set(key, [finding]);
+    } else {
+      bucket.push(finding);
+    }
+  }
+
+  const lines = ["Unfixed review findings:", ""];
+
+  for (const [reviewRunId, findings] of findingsByRun) {
+    lines.push(`Review ${reviewRunId}`);
+    if (findings.length === 0) {
+      continue;
+    }
+
+    lines.push(`Target: ${findings[0]?.targetHint ?? ""}`);
+
+    for (const finding of findings) {
+      const referenceText =
+        finding.comment.references.length === 0
+          ? ""
+          : ` (${finding.comment.references.map(formatReference).join(", ")})`;
+      lines.push(
+        `- ${finding.comment.priority} ${finding.comment.id} (${reviewRunId}:${finding.comment.id})${referenceText}: ${finding.comment.comment}`,
+      );
+    }
+
+    lines.push("");
+  }
+
+  lines.push("Use /review-fix finding <finding-id> [<finding-id> ...]");
+
+  return lines.join("\n").trim();
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -1040,6 +1095,14 @@ export function createReviewFlowController(
 
     if (command.selector.kind === "help") {
       ctx.ui.notify(REVIEW_FIX_USAGE, "info");
+      return;
+    }
+
+    if (command.selector.kind === "list") {
+      const listResult = listUnfixedReviewFindings(
+        ctx.sessionManager.getEntries(),
+      );
+      ctx.ui.notify(formatUnfixedReviewFindingsText(listResult), "info");
       return;
     }
 

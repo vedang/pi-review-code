@@ -384,6 +384,7 @@ function createHarness(options: HarnessOptions = {}) {
   }> = [];
   const startedFixRuns: unknown[] = [];
   const clearedRuns: unknown[] = [];
+  const waitForIdleCalls: number[] = [];
   const navigateResults = [...(options.navigateResults ?? [])];
 
   const entries = options.entries ?? [
@@ -441,7 +442,9 @@ function createHarness(options: HarnessOptions = {}) {
       getLeafId: () => "leaf-fix-origin",
       getEntries: () => entries,
     },
-    waitForIdle: async () => {},
+    waitForIdle: async () => {
+      waitForIdleCalls.push(1);
+    },
     navigateTree: async (
       targetId: string,
       navOptions: { summarize?: boolean; label?: string },
@@ -482,6 +485,7 @@ function createHarness(options: HarnessOptions = {}) {
     navigateCalls,
     startedFixRuns,
     clearedRuns,
+    waitForIdleCalls,
   };
 }
 
@@ -513,6 +517,80 @@ test("review-fix without arguments shows help without launching", async () => {
   assert.deepEqual(harness.startedFixRuns, []);
   assert.deepEqual(harness.notifications, [
     { message: REVIEW_FIX_USAGE, level: "info" },
+  ]);
+});
+
+test("review-fix list shows unfixed findings without model or branch launch", async () => {
+  const fixed = comment({
+    id: "finding-fixed",
+    runId: "review-1",
+    priority: "P1",
+    comment: "Already fixed race.",
+  });
+  const open = comment({
+    id: "finding-open",
+    runId: "review-1",
+    priority: "P2",
+    comment: "Logout leaves stale cache.",
+    references: [{ filePath: "src/cache.ts", startLine: 10 }],
+  });
+  const harness = createHarness({
+    model: null,
+    entries: [
+      reviewSummaryEntry("review-1", [fixed, open]),
+      fixSummaryEntry("fix-1", "review-1", [fixed]),
+    ],
+  });
+
+  await harness.controller.handleReviewFixCommand("list", harness.ctx);
+
+  assert.deepEqual(harness.waitForIdleCalls, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.startedFixRuns, []);
+  assert.equal(harness.notifications.length, 1);
+  assert.equal(harness.notifications[0]?.level, "info");
+
+  const message = harness.notifications[0]?.message ?? "";
+  assert.match(message, /Unfixed review findings/);
+  assert.match(message, /Review review-1/);
+  assert.match(message, /Target: review auth boundaries/);
+  assert.match(message, /P2 finding-open/);
+  assert.match(message, /src\/cache\.ts:10/);
+  assert.match(message, /Logout leaves stale cache\./);
+  assert.match(
+    message,
+    /Use \/review-fix finding <finding-id> \[<finding-id> \.\.\.\]/,
+  );
+  assert.doesNotMatch(message, /finding-fixed/);
+});
+
+test("review-fix list reports all-fixed and no-findings distinctly", async () => {
+  const fixed = comment({ id: "finding-fixed", runId: "review-1" });
+  const allFixedHarness = createHarness({
+    entries: [
+      reviewSummaryEntry("review-1", [fixed]),
+      fixSummaryEntry("fix-1", "review-1", [fixed]),
+    ],
+  });
+
+  await allFixedHarness.controller.handleReviewFixCommand(
+    "list",
+    allFixedHarness.ctx,
+  );
+
+  assert.deepEqual(allFixedHarness.notifications, [
+    { message: "All review findings have been fixed.", level: "info" },
+  ]);
+
+  const noFindingsHarness = createHarness({ entries: [] });
+
+  await noFindingsHarness.controller.handleReviewFixCommand(
+    "list",
+    noFindingsHarness.ctx,
+  );
+
+  assert.deepEqual(noFindingsHarness.notifications, [
+    { message: "No review findings found.", level: "info" },
   ]);
 });
 
