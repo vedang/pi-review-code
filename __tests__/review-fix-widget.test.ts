@@ -108,6 +108,118 @@ test("review fix widget renders empty state when no findings exist", () => {
   assert.ok(text.includes("Cancel"));
 });
 
+test("Space and Enter toggle open findings and submit in displayed order", () => {
+  const { component, results } = createComponent({
+    ...baseConfig,
+    findings: [finding({ id: "finding-a" }), finding({ id: "finding-b" })],
+    initialSelectedFindingIds: [],
+    initialFixContext: undefined,
+  });
+
+  component.handleInput?.(" ");
+  component.handleInput?.("\x1b[B");
+  component.handleInput?.("\r");
+  component.handleInput?.("\x13");
+
+  assert.deepEqual(results, [
+    {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["finding-a", "finding-b"],
+    },
+  ]);
+});
+
+test("fixed findings stay disabled when focused and cannot be toggled", () => {
+  const { component, results } = createComponent({
+    ...baseConfig,
+    findings: [
+      finding({ id: "finding-a", fixed: true }),
+      finding({ id: "finding-b" }),
+    ],
+    initialSelectedFindingIds: [],
+    initialFixContext: undefined,
+  });
+
+  component.handleInput?.(" ");
+  component.handleInput?.("\x1b[B");
+  component.handleInput?.(" ");
+  component.handleInput?.("\x13");
+
+  assert.deepEqual(results, [
+    {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["finding-b"],
+    },
+  ]);
+});
+
+test("a selects and clears all open findings", () => {
+  const { component, results } = createComponent({
+    ...baseConfig,
+    findings: [
+      finding({ id: "finding-a" }),
+      finding({ id: "finding-b", fixed: true }),
+      finding({ id: "finding-c" }),
+    ],
+    initialSelectedFindingIds: [],
+    initialFixContext: undefined,
+  });
+
+  component.handleInput?.("a");
+  component.handleInput?.("\x13");
+
+  assert.deepEqual(results, [
+    {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["finding-a", "finding-c"],
+    },
+  ]);
+
+  const { component: secondComponent, results: secondResults } =
+    createComponent({
+      ...baseConfig,
+      findings: [finding({ id: "finding-a" }), finding({ id: "finding-b" })],
+      initialSelectedFindingIds: [],
+      initialFixContext: undefined,
+    });
+
+  secondComponent.handleInput?.("a");
+  secondComponent.handleInput?.("a");
+  secondComponent.handleInput?.("\x13");
+
+  assert.deepEqual(secondResults, []);
+  assert.ok(
+    secondComponent
+      .render(72)
+      .some((line) => line.includes("Select at least one finding to fix.")),
+  );
+});
+
+test("long finding lists scroll and keep active row visible", () => {
+  const findings = Array.from({ length: 12 }, (_value, index) =>
+    finding({ id: `finding-${index + 1}` }),
+  );
+  const { component } = createComponent({
+    ...baseConfig,
+    findings,
+    initialSelectedFindingIds: [],
+    initialFixContext: undefined,
+  });
+
+  for (let index = 0; index < 9; index += 1) {
+    component.handleInput?.("\x1b[B");
+  }
+
+  const text = component.render(80).join("\n");
+
+  assert.ok(text.includes("showing 3-10 of 12"));
+  assert.ok(text.includes("› [ ] P1 finding-10"));
+  assert.ok(!text.includes("finding-1 src/auth.ts:42-45"));
+});
+
 test("review fix widget keeps rendered lines within width", () => {
   const { component } = createComponent({
     ...baseConfig,

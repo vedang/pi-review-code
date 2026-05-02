@@ -226,6 +226,8 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   private readonly contextEditor: Editor;
   private readonly selectedFindingIds: Set<string>;
   private activeField: ActiveField = "findings";
+  private activeFindingIndex = 0;
+  private findingScrollOffset = 0;
   private selectedAction: SubmitCancelAction = "submit";
   private validationMessage: string | undefined;
   private isDone = false;
@@ -292,6 +294,11 @@ class ReviewFixWidgetComponent implements Component, Focusable {
 
     if (this.activeField === "actions") {
       this.handleActionInput(data);
+      return;
+    }
+
+    if (this.activeField === "findings") {
+      this.handleFindingInput(data);
       return;
     }
 
@@ -381,11 +388,28 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       return;
     }
 
-    for (const finding of this.config.findings) {
+    const visibleRange = this.getVisibleFindingRange();
+
+    if (this.config.findings.length > this.getMaxVisibleFindings()) {
+      addLine(
+        this.theme.fg(
+          "dim",
+          `  showing ${visibleRange.start + 1}-${visibleRange.end} of ${this.config.findings.length}`,
+        ),
+      );
+    }
+
+    for (let index = visibleRange.start; index < visibleRange.end; index += 1) {
+      const finding = this.config.findings[index];
+      if (finding === undefined) {
+        continue;
+      }
+      const activeMarker =
+        index === this.activeFindingIndex ? this.theme.fg("accent", "›") : " ";
       const checkbox = this.renderCheckbox(finding);
       const refs = formatReferences(finding.references);
       const preview = firstCommentLine(finding.comment);
-      const row = `${checkbox} ${finding.priority} ${finding.id} ${refs} ${preview}`;
+      const row = `${activeMarker} ${checkbox} ${finding.priority} ${finding.id.trim()} ${refs} ${preview}`;
       addLine(`  ${row}`);
     }
   }
@@ -400,6 +424,134 @@ class ReviewFixWidgetComponent implements Component, Focusable {
     }
 
     return "[ ]";
+  }
+
+  private handleFindingInput(data: string): void {
+    if (this.config.findings.length === 0) {
+      return;
+    }
+
+    if (matchesKey(data, Key.up)) {
+      this.moveActiveFinding(-1);
+      return;
+    }
+
+    if (matchesKey(data, Key.down)) {
+      this.moveActiveFinding(1);
+      return;
+    }
+
+    if (matchesKey(data, Key.enter) || data === " ") {
+      this.toggleActiveFinding();
+      return;
+    }
+
+    if (data === "a" || data === "A") {
+      this.toggleAllOpenFindings();
+    }
+  }
+
+  private moveActiveFinding(direction: -1 | 1): void {
+    const maxIndex = this.config.findings.length - 1;
+    this.activeFindingIndex = Math.max(
+      0,
+      Math.min(maxIndex, this.activeFindingIndex + direction),
+    );
+    this.ensureActiveFindingVisible();
+    this.requestRender();
+  }
+
+  private toggleActiveFinding(): void {
+    const finding = this.config.findings[this.activeFindingIndex];
+    if (finding === undefined || finding.fixed) {
+      return;
+    }
+
+    const findingId = finding.id.trim();
+    if (findingId.length === 0) {
+      return;
+    }
+
+    if (this.selectedFindingIds.has(findingId)) {
+      this.selectedFindingIds.delete(findingId);
+    } else {
+      this.selectedFindingIds.add(findingId);
+    }
+
+    this.validationMessage = undefined;
+    this.requestRender();
+  }
+
+  private toggleAllOpenFindings(): void {
+    const openFindingIds = this.config.findings
+      .filter((finding) => !finding.fixed)
+      .map((finding) => finding.id.trim())
+      .filter((findingId) => findingId.length > 0);
+
+    if (openFindingIds.length === 0) {
+      return;
+    }
+
+    const allOpenSelected = openFindingIds.every((findingId) =>
+      this.selectedFindingIds.has(findingId),
+    );
+
+    for (const findingId of openFindingIds) {
+      if (allOpenSelected) {
+        this.selectedFindingIds.delete(findingId);
+      } else {
+        this.selectedFindingIds.add(findingId);
+      }
+    }
+
+    this.validationMessage = undefined;
+    this.requestRender();
+  }
+
+  private getVisibleFindingRange(): { start: number; end: number } {
+    this.ensureActiveFindingVisible();
+
+    const totalCount = this.config.findings.length;
+    const visibleCount = Math.min(this.getMaxVisibleFindings(), totalCount);
+
+    return {
+      start: this.findingScrollOffset,
+      end: Math.min(totalCount, this.findingScrollOffset + visibleCount),
+    };
+  }
+
+  private ensureActiveFindingVisible(): void {
+    const totalCount = this.config.findings.length;
+    if (totalCount === 0) {
+      this.activeFindingIndex = 0;
+      this.findingScrollOffset = 0;
+      return;
+    }
+
+    const visibleCount = Math.min(this.getMaxVisibleFindings(), totalCount);
+    this.activeFindingIndex = Math.max(
+      0,
+      Math.min(totalCount - 1, this.activeFindingIndex),
+    );
+
+    if (this.activeFindingIndex < this.findingScrollOffset) {
+      this.findingScrollOffset = this.activeFindingIndex;
+    }
+
+    if (this.activeFindingIndex >= this.findingScrollOffset + visibleCount) {
+      this.findingScrollOffset = this.activeFindingIndex - visibleCount + 1;
+    }
+
+    const maxOffset = Math.max(0, totalCount - visibleCount);
+    this.findingScrollOffset = Math.max(
+      0,
+      Math.min(maxOffset, this.findingScrollOffset),
+    );
+  }
+
+  private getMaxVisibleFindings(): number {
+    const terminalRows = Math.max(1, Math.floor(this.tui.terminal.rows));
+    return Math.max(3, Math.min(8, terminalRows - 18));
   }
 
   private renderFieldHeader(
