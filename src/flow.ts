@@ -119,13 +119,34 @@ export type ReviewFindingForFixList = {
   comment: ReviewComment;
 };
 
+export type ReviewFixWidgetFinding = {
+  reviewRunId: string;
+  targetHint: string;
+  completedAt: number;
+  comment: ReviewComment;
+  fixed: boolean;
+};
+
+export type ReviewFixWidgetData =
+  | {
+      ok: true;
+      reviewRunId: string;
+      targetHint: string;
+      completedAt: number;
+      findings: ReviewFixWidgetFinding[];
+    }
+  | {
+      ok: false;
+      reason: "no-review-findings";
+      findings: [];
+    };
+
 export type ReviewSessionBeforeTreeResult = {
   summary: {
     summary: string;
     details: ReviewBranchSummaryDetails | FixBranchSummaryDetails;
   };
 };
-
 type ReviewInputWidgetKind = "review" | "diff-against" | "pr";
 
 type ReviewInputWidgetConfig = {
@@ -798,6 +819,59 @@ export function selectReviewSummaryForFix(
     reviewPrompt: selected.reviewPrompt,
     completedAt: selected.completedAt,
     comments: selected.comments,
+  };
+}
+
+export function buildReviewFixWidgetData(
+  entries: unknown[],
+): ReviewFixWidgetData {
+  const fixedFindingKeys = new Set<string>();
+  let latestReviewSummary: ParsedReviewSummaryForFix | undefined;
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const review = parseReviewSummaryForFixEntry(entries[index], index);
+    if (review !== undefined) {
+      if (review.comments.length > 0) {
+        latestReviewSummary =
+          latestReviewSummary === undefined
+            ? review
+            : chooseLatestReviewSummary(review, latestReviewSummary);
+      }
+      continue;
+    }
+
+    const fix = parseFixSummaryForFixEntry(entries[index], index);
+    if (fix === undefined) {
+      continue;
+    }
+
+    for (const commentId of fix.commentIds) {
+      fixedFindingKeys.add(reviewFindingKey(fix.sourceReviewRunId, commentId));
+    }
+  }
+
+  if (latestReviewSummary === undefined) {
+    return {
+      ok: false,
+      reason: "no-review-findings",
+      findings: [],
+    };
+  }
+
+  return {
+    ok: true,
+    reviewRunId: latestReviewSummary.runId,
+    targetHint: latestReviewSummary.targetHint,
+    completedAt: latestReviewSummary.completedAt,
+    findings: latestReviewSummary.comments.map((comment) => ({
+      reviewRunId: latestReviewSummary.runId,
+      targetHint: latestReviewSummary.targetHint,
+      completedAt: latestReviewSummary.completedAt,
+      comment,
+      fixed: fixedFindingKeys.has(
+        reviewFindingKey(latestReviewSummary.runId, comment.id),
+      ),
+    })),
   };
 }
 

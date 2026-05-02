@@ -9,6 +9,7 @@ import {
   REVIEW_PROMPT_ENTRY_TYPE,
   REVIEW_SUMMARY_ENTRY_TYPE,
   buildFixBranchSummary,
+  buildReviewFixWidgetData,
   createReviewFlowController,
   listUnfixedReviewFindings,
   selectReviewSummaryForFix,
@@ -335,6 +336,106 @@ test("listUnfixedReviewFindings dedupes review summaries by newest completion", 
     result.unfixed.map((item) => item.comment.id),
     ["fresh"],
   );
+});
+
+test("buildReviewFixWidgetData chooses latest completed review with all findings", () => {
+  const oldFinding = comment({ id: "old", runId: "review-1" });
+  const first = comment({ id: "first", runId: "review-2" });
+  const second = comment({ id: "second", runId: "review-2" });
+
+  const result = buildReviewFixWidgetData([
+    reviewSummaryEntry("review-1", [oldFinding], { completedAt: 100 }),
+    reviewSummaryEntry("review-2", [first, second], {
+      completedAt: 200,
+      targetHint: "review cache boundaries",
+    }),
+  ]);
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.equal(result.reviewRunId, "review-2");
+  assert.equal(result.targetHint, "review cache boundaries");
+  assert.equal(result.completedAt, 200);
+  assert.deepEqual(
+    result.findings.map((item) => item.comment.id),
+    ["first", "second"],
+  );
+  assert.deepEqual(
+    result.findings.map((item) => item.fixed),
+    [false, false],
+  );
+  assert.deepEqual(
+    result.findings.map((item) => item.reviewRunId),
+    ["review-2", "review-2"],
+  );
+  assert.deepEqual(
+    result.findings.map((item) => item.targetHint),
+    ["review cache boundaries", "review cache boundaries"],
+  );
+  assert.deepEqual(
+    result.findings.map((item) => item.completedAt),
+    [200, 200],
+  );
+});
+
+test("buildReviewFixWidgetData marks fixed findings for latest review", () => {
+  const fixed = comment({ id: "fixed", runId: "review-1" });
+  const open = comment({ id: "open", runId: "review-1" });
+
+  const result = buildReviewFixWidgetData([
+    reviewSummaryEntry("review-1", [fixed, open]),
+    fixSummaryEntry("fix-1", "review-1", [fixed]),
+  ]);
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepEqual(
+    result.findings.map((item) => [item.comment.id, item.fixed]),
+    [
+      ["fixed", true],
+      ["open", false],
+    ],
+  );
+});
+
+test("buildReviewFixWidgetData keys fixed findings by review run", () => {
+  const olderSameId = comment({ id: "same-id", runId: "review-1" });
+  const latestSameId = comment({ id: "same-id", runId: "review-2" });
+
+  const result = buildReviewFixWidgetData([
+    reviewSummaryEntry("review-1", [olderSameId], { completedAt: 100 }),
+    reviewSummaryEntry("review-2", [latestSameId], { completedAt: 200 }),
+    fixSummaryEntry("fix-1", "review-1", [olderSameId]),
+  ]);
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepEqual(
+    result.findings.map((item) => [item.comment.id, item.fixed]),
+    [["same-id", false]],
+  );
+});
+
+test("buildReviewFixWidgetData returns empty reason when no review findings exist", () => {
+  const result = buildReviewFixWidgetData([
+    reviewSummaryEntry("review-empty", [], { completedAt: 200 }),
+    { type: "custom", customType: REVIEW_SUMMARY_ENTRY_TYPE, data: {} },
+  ]);
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "no-review-findings",
+    findings: [],
+  });
 });
 
 test("buildReviewFixPrompt lists review comments one by one with refs", () => {
