@@ -124,6 +124,7 @@ test("review state manager persists fix run and disables comment tool", () => {
     originThinkingLevel: "medium",
     sourceReviewRunId: "review-1",
     commentIds: ["comment-1", "comment-2"],
+    fixContext: "Focus the auth edge case.",
   });
 
   assert.deepEqual(setActiveToolsCalls, [["read", "bash"]]);
@@ -142,6 +143,7 @@ test("review state manager persists fix run and disables comment tool", () => {
         originThinkingLevel: "medium",
         sourceReviewRunId: "review-1",
         commentIds: ["comment-1", "comment-2"],
+        fixContext: "Focus the auth edge case.",
       },
     },
   ]);
@@ -167,6 +169,7 @@ test("getLatestReviewState reconstructs persisted fix state", () => {
             originThinkingLevel: "medium",
             sourceReviewRunId: "review-1",
             commentIds: ["comment-1"],
+            fixContext: "Use minimal changes.",
           },
         },
       ],
@@ -174,6 +177,44 @@ test("getLatestReviewState reconstructs persisted fix state", () => {
   } as never);
 
   assert.deepEqual(state, {
+    version: 1,
+    activeKind: "fix",
+    originLeafId: "leaf-2",
+    runId: "fix-1",
+    targetHint: "origin/main",
+    reviewPrompt: "Fix review comments",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1"],
+    fixContext: "Use minimal changes.",
+  });
+});
+
+test("review state manager omits blank fix context", () => {
+  const appended: Array<{ customType: string; data: unknown }> = [];
+  const manager = createReviewStateManager({
+    appendEntry: (customType: string, data: unknown) =>
+      appended.push({ customType, data }),
+    getActiveTools: () => ["read"],
+    setActiveTools: () => {},
+  } as never);
+
+  manager.startFixRun({ hasUI: false } as never, {
+    originLeafId: "leaf-2",
+    runId: "fix-1",
+    targetHint: "origin/main",
+    reviewPrompt: "Fix review comments",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1"],
+    fixContext: "  \n\t  ",
+  });
+
+  assert.deepEqual(appended[0]?.data, {
     version: 1,
     activeKind: "fix",
     originLeafId: "leaf-2",

@@ -99,6 +99,7 @@ export interface ReviewActiveRunInfo {
 export interface ReviewFixRunInfo extends ReviewActiveRunInfo {
   sourceReviewRunId: string;
   commentIds: string[];
+  fixContext?: string;
 }
 
 export interface ReviewActiveState

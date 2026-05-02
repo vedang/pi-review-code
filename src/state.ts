@@ -23,6 +23,19 @@ function hasString(value: Record<string, unknown>, key: string): boolean {
   return typeof raw === "string" && raw.length > 0;
 }
 
+function readOptionalTrimmedString(
+  value: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const raw = value[key];
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function readStateData(raw: unknown): ReviewState | undefined {
   if (!isRecord(raw) || raw.version !== REVIEW_STATE_VERSION) {
     return undefined;
@@ -75,11 +88,14 @@ function readStateData(raw: unknown): ReviewState | undefined {
     return undefined;
   }
 
+  const fixContext = readOptionalTrimmedString(raw, "fixContext");
+
   return {
     ...baseState,
     activeKind: "fix",
     sourceReviewRunId: String(raw.sourceReviewRunId),
     commentIds,
+    ...(fixContext === undefined ? {} : { fixContext }),
   };
 }
 
@@ -158,6 +174,8 @@ function toReviewStateValue(
 }
 
 function toFixStateValue(value: ReviewFixStateStart): ReviewFixState {
+  const fixContext = value.fixContext?.trim();
+
   return {
     version: REVIEW_STATE_VERSION,
     activeKind: "fix",
@@ -170,6 +188,9 @@ function toFixStateValue(value: ReviewFixStateStart): ReviewFixState {
     originThinkingLevel: value.originThinkingLevel,
     sourceReviewRunId: value.sourceReviewRunId,
     commentIds: [...value.commentIds],
+    ...(fixContext === undefined || fixContext.length === 0
+      ? {}
+      : { fixContext }),
   };
 }
 
