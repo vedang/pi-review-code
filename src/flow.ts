@@ -898,13 +898,14 @@ function sendPromptMessage(
 function buildSummaryMessageContent(
   summary: ReviewBranchSummary | FixBranchSummary,
 ): string {
+  const count = summary.details.comments.length;
+  const findingText = `${count} finding${count === 1 ? "" : "s"}`;
+
   if (summary.details.kind === "review") {
-    const count = summary.details.comments.length;
-    return `Review findings ${summary.details.runId} completed with ${count} finding${count === 1 ? "" : "s"}.`;
+    return `Review findings ${summary.details.runId} completed with ${findingText}.`;
   }
 
-  const count = summary.details.comments.length;
-  return `Review-fix ${summary.details.runId} completed for ${count} finding${count === 1 ? "" : "s"}.`;
+  return `Review-fix ${summary.details.runId} completed for ${findingText}.`;
 }
 
 function sendSummaryMessage(

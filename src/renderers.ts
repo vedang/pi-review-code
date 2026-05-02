@@ -169,16 +169,12 @@ function formatComments(
   );
 
   if (!expanded) {
-    if (comments.length > visibleComments.length) {
-      lines.push(
-        theme.fg(
-          "dim",
-          `… ${comments.length - visibleComments.length} more; expand for full finding text`,
-        ),
-      );
-    } else {
-      lines.push(theme.fg("dim", "… expand for full finding text"));
-    }
+    const hiddenCount = comments.length - visibleComments.length;
+    const hint =
+      hiddenCount > 0
+        ? `… ${hiddenCount} more; expand for full finding text`
+        : "… expand for full finding text";
+    lines.push(theme.fg("dim", hint));
   }
 
   return lines;
