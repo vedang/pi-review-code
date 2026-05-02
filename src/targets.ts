@@ -122,6 +122,9 @@ export async function resolveReviewTarget(
       kind: "diff-against",
       targetHint: target.targetHint,
       ref,
+      ...(target.reviewContext !== undefined
+        ? { reviewContext: target.reviewContext }
+        : {}),
       files,
       diffStat,
       ...(diffText !== undefined ? { diffText } : {}),
@@ -152,6 +155,9 @@ export async function resolveReviewTarget(
       kind: "prompt",
       targetHint: target.targetHint,
       prompt: target.prompt,
+      ...(target.reviewContext !== undefined
+        ? { reviewContext: target.reviewContext }
+        : {}),
       commandHints: [
         {
           label: "Inspect repository files",
@@ -176,6 +182,9 @@ export async function resolveReviewTarget(
       kind: "pr",
       targetHint: githubSelector.selector,
       selector: githubSelector.selector,
+      ...(target.reviewContext !== undefined
+        ? { reviewContext: target.reviewContext }
+        : {}),
       files: metadata.files,
       commandHints: [
         commandHint("Show PR diff", diffCommand.command, diffCommand.args),
@@ -205,6 +214,9 @@ export async function resolveReviewTarget(
       kind: "pr",
       targetHint: gitlabSelector.selector,
       selector: gitlabSelector.selector,
+      ...(target.reviewContext !== undefined
+        ? { reviewContext: target.reviewContext }
+        : {}),
       files: metadata.files,
       commandHints: [
         commandHint("Show MR diff", diffCommand.command, diffCommand.args),

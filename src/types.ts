@@ -2,18 +2,21 @@ export type ReviewDiffAgainstTarget = {
   kind: "diff-against";
   ref: string;
   targetHint: string;
+  reviewContext?: string;
 };
 
 export type ReviewPromptTarget = {
   kind: "prompt";
   prompt: string;
   targetHint: string;
+  reviewContext?: string;
 };
 
 export type ReviewPrTarget = {
   kind: "pr";
   selector: string;
   targetHint: string;
+  reviewContext?: string;
 };
 
 export type ReviewTarget =
@@ -192,6 +195,7 @@ export type ResolvedDiffAgainstTarget = {
   kind: "diff-against";
   ref: string;
   targetHint: string;
+  reviewContext?: string;
   files: string[];
   diffStat: string;
   commandHints: ReviewTargetCommandHint[];
@@ -202,6 +206,7 @@ export type ResolvedPromptTarget = {
   kind: "prompt";
   targetHint: string;
   prompt: string;
+  reviewContext?: string;
   commandHints: ReviewTargetCommandHint[];
 };
 
@@ -235,6 +240,7 @@ export type ResolvedPrTarget = {
   kind: "pr";
   targetHint: string;
   selector: string;
+  reviewContext?: string;
   files: string[];
   commandHints: ReviewTargetCommandHint[];
 } & (ResolvedGitHubPrMetadata | ResolvedGitLabMrMetadata);

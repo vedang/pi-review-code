@@ -138,12 +138,72 @@ test("buildReviewPromptDraftRequest preserves free-form prompt focus", () => {
   assert.match(request.userPrompt, /`rg '<query>'`/);
 });
 
-test("buildReviewPromptDraftRequest includes PR metadata and dedupe notes", () => {
+test("buildReviewPromptDraftRequest includes prompt review context", () => {
+  const request = buildReviewPromptDraftRequest({
+    kind: "prompt",
+    targetHint: "review schema names",
+    prompt: "review the database schema and ensure column names are sensible",
+    reviewContext: "Focus on auth table compatibility.",
+    commandHints: [
+      {
+        label: "Inspect repository files",
+        command: "find",
+        args: [".", "-type", "f"],
+      },
+      { label: "Search codebase", command: "rg", args: ["<query>"] },
+    ],
+  });
+
+  assert.match(
+    request.userPrompt,
+    /Focus: review the database schema and ensure column names are sensible\n\nHuman-provided review context:\nFocus on auth table compatibility\./,
+  );
+});
+
+test("buildReviewPromptDraftRequest includes diff review context", () => {
+  const request = buildReviewPromptDraftRequest(
+    {
+      ...diffTarget(),
+      reviewContext: "Pay attention to token rotation edge cases.",
+    },
+    {
+      diffText: "diff --git a/src/auth.ts b/src/auth.ts\n+rotateToken();",
+      maxEmbeddedDiffChars: 200,
+    },
+  );
+
+  assert.match(
+    request.userPrompt,
+    /Diff stat: 2 files changed, 20 insertions\(\+\)\n\nHuman-provided review context:\nPay attention to token rotation edge cases\.\n\nCommand hints:/,
+  );
+  assert.match(request.userPrompt, /diff --git a\/src\/auth\.ts/);
+});
+
+test("buildReviewPromptDraftRequest omits blank review context", () => {
+  const request = buildReviewPromptDraftRequest({
+    kind: "prompt",
+    targetHint: "review schema names",
+    prompt: "review the database schema",
+    reviewContext: "   ",
+    commandHints: [
+      {
+        label: "Inspect repository files",
+        command: "find",
+        args: [".", "-type", "f"],
+      },
+    ],
+  });
+
+  assert.doesNotMatch(request.userPrompt, /Human-provided review context:/);
+});
+
+test("buildReviewPromptDraftRequest includes PR metadata, context, and dedupe notes", () => {
   const request = buildReviewPromptDraftRequest({
     kind: "pr",
     provider: "github",
     selector: "https://github.com/owner/repo/pull/123",
     targetHint: "https://github.com/owner/repo/pull/123",
+    reviewContext: "Prioritize race conditions in refresh flow.",
     number: 123,
     title: "Fix auth refresh",
     body: "Rotate token before expiry",
@@ -169,6 +229,10 @@ test("buildReviewPromptDraftRequest includes PR metadata and dedupe notes", () =
   assert.match(request.userPrompt, /main → auth-refresh/);
   assert.match(request.userPrompt, /Files changed \(1\):/);
   assert.match(request.userPrompt, /src\/auth\.ts/);
+  assert.match(
+    request.userPrompt,
+    /Human-provided review context:\nPrioritize race conditions in refresh flow\.\n\nAvoid duplicate findings/,
+  );
   assert.match(request.userPrompt, /comment by bob: Existing concern/);
   assert.match(request.userPrompt, /Avoid duplicate findings/);
   assert.match(

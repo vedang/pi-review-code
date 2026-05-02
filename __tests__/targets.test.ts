@@ -37,7 +37,12 @@ function recordingExec(responses: Record<string, string>): {
 
 test("resolveReviewTarget resolves diff-against with safe command hints", async () => {
   const target = await resolveReviewTarget(
-    { kind: "diff-against", ref: "origin/main", targetHint: "origin/main" },
+    {
+      kind: "diff-against",
+      ref: "origin/main",
+      targetHint: "origin/main",
+      reviewContext: "Focus auth boundary changes.",
+    },
     {
       exec: fakeExec({
         [["git", "--no-pager", "diff", "origin/main", "--name-only"].join(
@@ -55,6 +60,7 @@ test("resolveReviewTarget resolves diff-against with safe command hints", async 
     kind: "diff-against",
     targetHint: "origin/main",
     ref: "origin/main",
+    reviewContext: "Focus auth boundary changes.",
     files: ["src/a.ts", "src/b.ts"],
     diffStat: "2 files changed",
     diffText: "diff --git a/src/a.ts b/src/a.ts\n+change\n",
@@ -128,6 +134,7 @@ test("resolveReviewTarget preserves prompt targets without executing commands", 
       kind: "prompt",
       prompt: "review schema names",
       targetHint: "review schema names",
+      reviewContext: "Check API compatibility.",
     },
     {
       exec: async () => {
@@ -140,6 +147,7 @@ test("resolveReviewTarget preserves prompt targets without executing commands", 
     kind: "prompt",
     targetHint: "review schema names",
     prompt: "review schema names",
+    reviewContext: "Check API compatibility.",
     commandHints: [
       {
         label: "Inspect repository files",
@@ -157,6 +165,7 @@ test("resolveReviewTarget resolves GitHub PR metadata with fake exec", async () 
       kind: "pr",
       selector: "https://github.com/owner/repo/pull/123",
       targetHint: "https://github.com/owner/repo/pull/123",
+      reviewContext: "Audit refresh-token race conditions.",
     },
     {
       exec: fakeExec({
@@ -180,6 +189,7 @@ test("resolveReviewTarget resolves GitHub PR metadata with fake exec", async () 
 
   assert.equal(target.kind, "pr");
   assert.equal(target.provider, "github");
+  assert.equal(target.reviewContext, "Audit refresh-token race conditions.");
   assert.deepEqual(target.files, ["src/auth.ts"]);
   assert.deepEqual(target.commandHints, [
     {
@@ -196,6 +206,7 @@ test("resolveReviewTarget resolves GitLab MR metadata with fake exec", async () 
       kind: "pr",
       selector: "https://gitlab.com/group/project/-/merge_requests/45",
       targetHint: "https://gitlab.com/group/project/-/merge_requests/45",
+      reviewContext: "Check GitLab pipeline assumptions.",
     },
     {
       exec: fakeExec({
@@ -219,6 +230,7 @@ test("resolveReviewTarget resolves GitLab MR metadata with fake exec", async () 
 
   assert.equal(target.kind, "pr");
   assert.equal(target.provider, "gitlab");
+  assert.equal(target.reviewContext, "Check GitLab pipeline assumptions.");
   assert.deepEqual(target.files, ["src/auth.ts"]);
   assert.deepEqual(target.commandHints, [
     {

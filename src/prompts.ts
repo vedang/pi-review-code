@@ -50,6 +50,13 @@ function buildCommandHintsBlock(
     .join("\n");
 }
 
+function buildReviewContextBlock(reviewContext?: string): string[] {
+  const trimmed = reviewContext?.trim() ?? "";
+  return trimmed.length === 0
+    ? []
+    : ["", "Human-provided review context:", trimmed];
+}
+
 function buildReviewRubric(): string {
   const priorities = REVIEW_PRIORITIES.join("/");
 
@@ -77,6 +84,7 @@ function buildDiffReviewBlock(
     `Files changed (${target.files.length}):`,
     ...target.files.map((path) => `- ${path}`),
     `Diff stat: ${target.diffStat}`,
+    ...buildReviewContextBlock(target.reviewContext),
     "",
     `Command hints:\n${buildCommandHintsBlock(target.commandHints)}`,
   ];
@@ -104,6 +112,7 @@ function buildPromptReviewBlock(target: ResolvedPromptTarget): string {
     `Target hint: ${target.targetHint}`,
     "Snapshot/aspect review",
     `Focus: ${target.prompt}`,
+    ...buildReviewContextBlock(target.reviewContext),
     "",
     `Command hints:\n${buildCommandHintsBlock(target.commandHints)}`,
   ].join("\n");
@@ -130,6 +139,7 @@ function buildPrReviewBlock(target: ResolvedPrTarget): string {
     `${target.baseRefName} → ${target.headRefName}`,
     `Files changed (${target.files.length}):`,
     ...target.files.map((path) => `- ${path}`),
+    ...buildReviewContextBlock(target.reviewContext),
     "",
     "Avoid duplicate findings.",
     "",
