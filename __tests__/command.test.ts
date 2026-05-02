@@ -129,7 +129,11 @@ test("review-specific usage constants mention renamed commands", () => {
     /\/review <review request>/,
     /\/review-diff-against <ref>/,
     /\/review-pr <github-url\|gitlab-url\|github-number>/,
-    /\/review-fix \[latest\|<review-run-id>\|<finding-id>\]/,
+    /\/review-fix \[list\|latest\|<review-run-id>\|<finding-id>\]/,
+  ]);
+  assertUsageContains(REVIEW_FIX_USAGE, [
+    /\/review-fix list/,
+    /\/review-fix finding <finding-id> \[<finding-id> \.\.\.\]/,
   ]);
   assertUsageContains(REVIEW_DIFF_AGAINST_USAGE, [
     /\/review-diff-against <ref>/,

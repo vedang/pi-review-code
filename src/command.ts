@@ -11,7 +11,7 @@ function formatUsage(...lines: string[]): string {
 
 export const REVIEW_USAGE = formatUsage(
   "  /review <review request>",
-  "  /review-fix [latest|<review-run-id>|<finding-id>]",
+  "  /review-fix [list|latest|<review-run-id>|<finding-id>]",
   "  /review-diff-against <ref>",
   "  /review-pr <github-url|gitlab-url|github-number>",
 );
@@ -27,10 +27,11 @@ export const REVIEW_PR_USAGE = formatUsage(
 export const REVIEW_FIX_USAGE = formatUsage(
   "  /review-fix",
   "  /review-fix latest",
+  "  /review-fix list",
   "  /review-fix <review-run-id>",
   "  /review-fix <finding-id>",
   "  /review-fix run <review-run-id>",
-  "  /review-fix finding <finding-id>",
+  "  /review-fix finding <finding-id> [<finding-id> ...]",
 );
 
 const UNTERMINATED_QUOTE_ERROR = "Unterminated quote in command arguments.";

@@ -470,6 +470,10 @@ export function selectReviewSummaryForFix(
         break;
       }
 
+      case "list":
+      case "finding-ids":
+        break;
+
       default: {
         const finding = firstCommentForFindingId(parsed, selector.id);
         if (finding !== undefined) {

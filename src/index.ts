@@ -26,7 +26,7 @@ export const REVIEW_HELP_TEXT = [
   "pi-review-code review flow is installed.",
   "Usage:",
   "- /review <review request>",
-  "- /review-fix [latest|<review-run-id>|<finding-id>]",
+  "- /review-fix [list|latest|<review-run-id>|<finding-id>]",
   "- /review-diff-against <ref>",
   "- /review-pr <github-url|gitlab-url|github-number>",
 ].join("\n");
@@ -36,8 +36,9 @@ export const REVIEW_FIX_HELP_TEXT = [
   "Usage:",
   "- /review-fix",
   "- /review-fix latest",
+  "- /review-fix list",
   "- /review-fix run <review-run-id>",
-  "- /review-fix finding <finding-id>",
+  "- /review-fix finding <finding-id> [<finding-id> ...]",
   "- /review-fix <review-run-id>",
   "- /review-fix <finding-id>",
 ].join("\n");

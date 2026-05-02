@@ -29,16 +29,18 @@ Review a free-form aspect of the codebase:
 
 The prompt draft turns the request into concrete inspection guidance.
 
-### `/review-fix [latest|<review-run-id>|<finding-id>]`
+### `/review-fix [list|latest|<review-run-id>|<finding-id>]`
 
 Start a same-session fix branch for review comments, or omit arguments for usage help:
 
 ```text
-/review-fix                       # show help
-/review-fix latest                # latest completed review
-/review-fix run <review-run-id>   # specific review run
-/review-fix finding <finding-id>  # one finding
-/review-fix <id>                  # finding first, then review run
+/review-fix                                      # show help
+/review-fix latest                               # latest completed review
+/review-fix list                                 # unfixed findings
+/review-fix run <review-run-id>                  # specific review run
+/review-fix finding <finding-id>                 # one finding
+/review-fix finding <finding-id> <finding-id>    # multiple findings from one review
+/review-fix <id>                                 # finding first, then review run
 ```
 
 The fix prompt lists selected comments with priorities and references. The fix branch collapses back with a summary of attempted fixes.
