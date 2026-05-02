@@ -6,6 +6,7 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 
 import {
+  REVIEW_FIX_USAGE,
   parseReviewArgs,
   parseReviewDiffAgainstArgs,
   parseReviewFixArgs,
@@ -420,32 +421,81 @@ function chooseLatestReviewSummary(
   return a.order > b.order ? a : b;
 }
 
+function firstCommentForFindingId(
+  summary: ParsedReviewSummaryForFix,
+  findingId: string,
+): ReviewComment | undefined {
+  return summary.comments.find((comment) => comment.id === findingId);
+}
+
 export function selectReviewSummaryForFix(
   entries: unknown[],
   selector: ReviewFixSelector,
 ): ReviewSummaryForFix | undefined {
+  if (selector.kind === "help") {
+    return undefined;
+  }
+
+  const findingCandidates: ParsedReviewSummaryForFix[] = [];
   const candidates: ParsedReviewSummaryForFix[] = [];
 
   for (let index = 0; index < entries.length; index += 1) {
     const parsed = parseReviewSummaryForFixEntry(entries[index], index);
-    if (parsed === undefined || parsed.comments.length === 0) {
+    if (parsed === undefined) {
       continue;
     }
 
-    if (selector.kind === "run-id" && parsed.runId !== selector.runId) {
+    if (parsed.comments.length === 0) {
       continue;
     }
 
-    candidates.push(parsed);
+    switch (selector.kind) {
+      case "latest":
+        candidates.push(parsed);
+        break;
+
+      case "run-id":
+        if (parsed.runId === selector.runId) {
+          candidates.push(parsed);
+        }
+        break;
+
+      case "finding-id": {
+        const finding = firstCommentForFindingId(parsed, selector.findingId);
+        if (finding === undefined) {
+          break;
+        }
+
+        candidates.push({ ...parsed, comments: [finding] });
+        break;
+      }
+
+      default: {
+        const finding = firstCommentForFindingId(parsed, selector.id);
+        if (finding !== undefined) {
+          findingCandidates.push({ ...parsed, comments: [finding] });
+          break;
+        }
+
+        if (parsed.runId === selector.id) {
+          candidates.push(parsed);
+        }
+      }
+    }
   }
 
-  if (candidates.length === 0) {
+  const selectedCandidates =
+    selector.kind === "id" && findingCandidates.length > 0
+      ? findingCandidates
+      : candidates;
+
+  if (selectedCandidates.length === 0) {
     return undefined;
   }
 
-  const selected = candidates.reduce(
+  const selected = selectedCandidates.reduce(
     (best, candidate) => chooseLatestReviewSummary(candidate, best),
-    candidates[0],
+    selectedCandidates[0],
   );
 
   return {
@@ -814,17 +864,6 @@ export function createReviewFlowController(
       return;
     }
 
-    const model = ctx.model;
-    if (model === undefined) {
-      ctx.ui.notify(
-        "Cannot start review-fix: no active model is selected.",
-        "error",
-      );
-      return;
-    }
-
-    await ctx.waitForIdle();
-
     let command: ReturnType<typeof parseReviewFixArgs>;
     try {
       command = parseReviewFixArgs(args);
@@ -835,6 +874,22 @@ export function createReviewFlowController(
       );
       return;
     }
+
+    if (command.selector.kind === "help") {
+      ctx.ui.notify(REVIEW_FIX_USAGE, "info");
+      return;
+    }
+
+    const model = ctx.model;
+    if (model === undefined) {
+      ctx.ui.notify(
+        "Cannot start review-fix: no active model is selected.",
+        "error",
+      );
+      return;
+    }
+
+    await ctx.waitForIdle();
 
     const originLeafId = getLeafId(ctx);
     if (originLeafId === null) {

@@ -175,6 +175,16 @@ for (const [commandName, expectedHelp] of scaffoldHelpCases) {
   });
 }
 
+test("/review-fix shows help with empty args before runtime validation", async () => {
+  const harness = createRuntimeHarness();
+
+  await runCommand(harness, "review-fix");
+
+  assert.deepEqual(harness.notifications, [
+    { message: REVIEW_FIX_HELP_TEXT, level: "info" },
+  ]);
+});
+
 test("extension abandons persisted active review state on session_start", async () => {
   const harness = createRuntimeHarness();
   const handler = harness.events.get("session_start");

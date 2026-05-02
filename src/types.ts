@@ -26,6 +26,10 @@ export type ReviewCommand = {
   target: ReviewTarget;
 };
 
+export type ReviewFixHelpSelector = {
+  kind: "help";
+};
+
 export type ReviewFixLatestSelector = {
   kind: "latest";
 };
@@ -35,9 +39,22 @@ export type ReviewFixRunIdSelector = {
   runId: string;
 };
 
+export type ReviewFixFindingIdSelector = {
+  kind: "finding-id";
+  findingId: string;
+};
+
+export type ReviewFixIdSelector = {
+  kind: "id";
+  id: string;
+};
+
 export type ReviewFixSelector =
+  | ReviewFixHelpSelector
   | ReviewFixLatestSelector
-  | ReviewFixRunIdSelector;
+  | ReviewFixRunIdSelector
+  | ReviewFixFindingIdSelector
+  | ReviewFixIdSelector;
 
 export type ReviewFixCommand = {
   kind: "review-fix";

@@ -29,16 +29,25 @@ Review a free-form aspect of the codebase:
 
 The prompt draft turns the request into concrete inspection guidance.
 
-### `/review-fix [latest|run-id]`
+### `/review-fix [latest|<review-run-id>|<finding-id>]`
+
+Print command help:
+
+```text
+/review-fix
+```
 
 Start a same-session fix branch for comments from a completed review:
 
 ```text
-/review-fix
 /review-fix latest
-/review-fix review-run-id
+/review-fix run <review-run-id>
+/review-fix finding <finding-id>
+/review-fix <review-run-id>
+/review-fix <finding-id>
 ```
 
+If a single `<id>` matches both a finding and a run, `/review-fix <id>` targets the finding.
 The fix prompt lists selected comments one by one with priorities and references. The fix branch collapses back with a summary of attempted fixes.
 
 ### `/review-diff-against <ref>`

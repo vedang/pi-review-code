@@ -26,7 +26,7 @@ export const REVIEW_HELP_TEXT = [
   "pi-review-code review flow is installed.",
   "Usage:",
   "- /review <review request>",
-  "- /review-fix [latest|run-id]",
+  "- /review-fix [latest|<review-run-id>|<finding-id>]",
   "- /review-diff-against <ref>",
   "- /review-pr <github-url|gitlab-url|github-number>",
 ].join("\n");
@@ -36,7 +36,10 @@ export const REVIEW_FIX_HELP_TEXT = [
   "Usage:",
   "- /review-fix",
   "- /review-fix latest",
-  "- /review-fix <run-id>",
+  "- /review-fix run <review-run-id>",
+  "- /review-fix finding <finding-id>",
+  "- /review-fix <review-run-id>",
+  "- /review-fix <finding-id>",
 ].join("\n");
 
 type ReviewRuntimeMethods = Pick<
@@ -116,6 +119,7 @@ const REVIEW_COMMANDS = {
     name: "review-fix",
     description: "Fix findings from a recent pi-review-code run",
     helpText: REVIEW_FIX_HELP_TEXT,
+    hasEmptyArgsHelp: true,
   },
   review: {
     name: "review",

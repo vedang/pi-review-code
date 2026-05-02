@@ -121,7 +121,10 @@ test("review-specific usage constants mention renamed commands", () => {
     REVIEW_USAGE,
     /\/review-pr <github-url\|gitlab-url\|github-number>/,
   );
-  assert.match(REVIEW_USAGE, /\/review-fix \[latest\|run-id\]/);
+  assert.match(
+    REVIEW_USAGE,
+    /\/review-fix \[latest\|<review-run-id>\|<finding-id>\]/,
+  );
   assert.match(REVIEW_DIFF_AGAINST_USAGE, /\/review-diff-against <ref>/);
   assert.match(
     REVIEW_PR_USAGE,
@@ -145,7 +148,7 @@ test("rejects unterminated quotes", () => {
 test("parses /review-fix selectors", () => {
   assert.deepEqual(parseReviewFixArgs(""), {
     kind: "review-fix",
-    selector: { kind: "latest" },
+    selector: { kind: "help" },
   });
   assert.deepEqual(parseReviewFixArgs("latest"), {
     kind: "review-fix",
@@ -153,16 +156,29 @@ test("parses /review-fix selectors", () => {
   });
   assert.deepEqual(parseReviewFixArgs("rev_20260501_abc"), {
     kind: "review-fix",
+    selector: { kind: "id", id: "rev_20260501_abc" },
+  });
+  assert.deepEqual(parseReviewFixArgs('"finding id"'), {
+    kind: "review-fix",
+    selector: { kind: "id", id: "finding id" },
+  });
+  assert.deepEqual(parseReviewFixArgs("run rev_20260501_abc"), {
+    kind: "review-fix",
     selector: { kind: "run-id", runId: "rev_20260501_abc" },
   });
-  assert.deepEqual(parseReviewFixArgs('"rev id"'), {
+  assert.deepEqual(parseReviewFixArgs("finding 5044ff4b"), {
     kind: "review-fix",
-    selector: { kind: "run-id", runId: "rev id" },
+    selector: { kind: "finding-id", findingId: "5044ff4b" },
   });
 });
 
 test("rejects invalid /review-fix selectors", () => {
   assert.throws(() => parseReviewFixArgs('""'), new Error(REVIEW_FIX_USAGE));
+  assert.throws(() => parseReviewFixArgs("run"), new Error(REVIEW_FIX_USAGE));
+  assert.throws(
+    () => parseReviewFixArgs("finding"),
+    new Error(REVIEW_FIX_USAGE),
+  );
   assert.throws(
     () => parseReviewFixArgs("one two"),
     new Error(REVIEW_FIX_USAGE),

@@ -8,7 +8,7 @@ import type {
 export const REVIEW_USAGE = [
   "Usage:",
   "  /review <review request>",
-  "  /review-fix [latest|run-id]",
+  "  /review-fix [latest|<review-run-id>|<finding-id>]",
   "  /review-diff-against <ref>",
   "  /review-pr <github-url|gitlab-url|github-number>",
 ].join("\n");
@@ -27,7 +27,10 @@ export const REVIEW_FIX_USAGE = [
   "Usage:",
   "  /review-fix",
   "  /review-fix latest",
-  "  /review-fix <run-id>",
+  "  /review-fix <review-run-id>",
+  "  /review-fix <finding-id>",
+  "  /review-fix run <review-run-id>",
+  "  /review-fix finding <finding-id>",
 ].join("\n");
 
 const UNTERMINATED_QUOTE_ERROR = "Unterminated quote in command arguments.";
@@ -187,22 +190,53 @@ function parseReviewSelectorArgs(
 
 function parseReviewFixSelector(args: string[]): ReviewFixSelector {
   if (args.length === 0) {
-    return { kind: "latest" };
+    return { kind: "help" };
   }
 
-  if (args.length !== 1 || isBlank(args[0])) {
-    throw new Error(REVIEW_FIX_USAGE);
+  if (args.length === 1) {
+    const selectorText = args[0]?.trim() ?? "";
+    if (isBlank(selectorText)) {
+      throw new Error(REVIEW_FIX_USAGE);
+    }
+
+    if (selectorText === "latest") {
+      return { kind: "latest" };
+    }
+
+    if (selectorText === "run" || selectorText === "finding") {
+      throw new Error(REVIEW_FIX_USAGE);
+    }
+
+    return {
+      kind: "id",
+      id: selectorText,
+    };
   }
 
-  const selectorText = args[0].trim();
-  if (selectorText === "latest") {
-    return { kind: "latest" };
+  if (args.length === 2) {
+    const selectorType = args[0]?.trim() ?? "";
+    const selectorText = args[1]?.trim() ?? "";
+
+    if (isBlank(selectorText)) {
+      throw new Error(REVIEW_FIX_USAGE);
+    }
+
+    if (selectorType === "run") {
+      return {
+        kind: "run-id",
+        runId: selectorText,
+      };
+    }
+
+    if (selectorType === "finding") {
+      return {
+        kind: "finding-id",
+        findingId: selectorText,
+      };
+    }
   }
 
-  return {
-    kind: "run-id",
-    runId: selectorText,
-  };
+  throw new Error(REVIEW_FIX_USAGE);
 }
 
 export function parseReviewArgs(input: string): ReviewCommand {

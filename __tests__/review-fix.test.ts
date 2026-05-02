@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 
+import { REVIEW_FIX_USAGE } from "../src/command.js";
 import {
   REVIEW_FIX_SUMMARY_ENTRY_TYPE,
   REVIEW_PROMPT_ENTRY_TYPE,
@@ -84,6 +85,68 @@ test("selectReviewSummaryForFix finds explicit review run", () => {
   assert.deepEqual(
     selected?.comments.map((item) => item.id),
     ["one"],
+  );
+});
+
+test("selectReviewSummaryForFix can select one finding by id", () => {
+  const selected = selectReviewSummaryForFix(
+    [
+      reviewSummaryEntry("review-1", [
+        comment({ id: "finding-one", runId: "review-1" }),
+        comment({ id: "finding-two", runId: "review-1" }),
+      ]),
+      reviewSummaryEntry("review-2", [
+        comment({ id: "finding-three", runId: "review-2" }),
+      ]),
+    ],
+    { kind: "finding-id", findingId: "finding-two" },
+  );
+
+  assert.equal(selected?.runId, "review-1");
+  assert.deepEqual(
+    selected?.comments.map((item) => item.id),
+    ["finding-two"],
+  );
+});
+
+test("selectReviewSummaryForFix treats ambiguous id as finding before run", () => {
+  const selected = selectReviewSummaryForFix(
+    [
+      reviewSummaryEntry("review-1", [
+        comment({ id: "review-2", runId: "review-1" }),
+      ]),
+      reviewSummaryEntry("review-2", [
+        comment({ id: "other", runId: "review-2" }),
+      ]),
+    ],
+    { kind: "id", id: "review-2" },
+  );
+
+  assert.equal(selected?.runId, "review-1");
+  assert.deepEqual(
+    selected?.comments.map((item) => item.id),
+    ["review-2"],
+  );
+});
+
+test("selectReviewSummaryForFix falls back to run for ambiguous id", () => {
+  const selected = selectReviewSummaryForFix(
+    [
+      reviewSummaryEntry("review-1", [
+        comment({ id: "finding-one", runId: "review-1" }),
+        comment({ id: "finding-two", runId: "review-1" }),
+      ]),
+      reviewSummaryEntry("review-2", [
+        comment({ id: "finding-three", runId: "review-2" }),
+      ]),
+    ],
+    { kind: "id", id: "review-1" },
+  );
+
+  assert.equal(selected?.runId, "review-1");
+  assert.deepEqual(
+    selected?.comments.map((item) => item.id),
+    ["finding-one", "finding-two"],
   );
 });
 
@@ -235,6 +298,18 @@ function createHarness(options: HarnessOptions = {}) {
   };
 }
 
+test("review-fix without arguments shows help without launching", async () => {
+  const harness = createHarness();
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.startedFixRuns, []);
+  assert.deepEqual(harness.notifications, [
+    { message: REVIEW_FIX_USAGE, level: "info" },
+  ]);
+});
+
 test("review-fix launches fix branch for latest review comments", async () => {
   const harness = createHarness();
 
@@ -257,6 +332,40 @@ test("review-fix launches fix branch for latest review comments", async () => {
   ]);
   assert.deepEqual(harness.notifications, [
     { message: "Fix branch started: fix-1", level: "info" },
+  ]);
+});
+
+test("review-fix launches fix branch for one finding id", async () => {
+  const harness = createHarness({
+    entries: [
+      reviewSummaryEntry("review-1", [
+        comment({ id: "finding-one", runId: "review-1" }),
+        comment({
+          id: "finding-two",
+          runId: "review-1",
+          comment: "Logout leaves stale cache.",
+        }),
+      ]),
+    ],
+  });
+
+  await harness.controller.handleReviewFixCommand("finding-two", harness.ctx);
+
+  assert.equal(harness.sentUserMessages.length, 1);
+  assert.doesNotMatch(harness.sentUserMessages[0] ?? "", /finding-one/);
+  assert.match(harness.sentUserMessages[0] ?? "", /finding-two/);
+  assert.deepEqual(harness.startedFixRuns, [
+    {
+      runId: "fix-1",
+      originLeafId: "leaf-fix-origin",
+      targetHint: "review auth boundaries",
+      reviewPrompt: harness.sentUserMessages[0],
+      originModelProvider: "anthropic",
+      originModelId: "claude-sonnet",
+      originThinkingLevel: "medium",
+      sourceReviewRunId: "review-1",
+      commentIds: ["finding-two"],
+    },
   ]);
 });
 
