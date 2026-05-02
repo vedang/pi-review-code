@@ -2,20 +2,21 @@
 
 ![pi-review-code banner](images/banner.png)
 
-Context-rich code review extension for Pi.
+Context-rich code review extension for Pi. The central thesis:
 
-`pi-review-code` makes human context first-class: it resolves a review target, asks the current model to draft a detailed review prompt, lets you edit that prompt, then launches an isolated same-session review branch. When the branch finishes, Pi collapses back with review findings.
+> A good review of a large quantity of code is not possible without human-provided context.
+
+`pi-review-code` makes human context first-class: it resolves a review target, asks the current model to draft a detailed review prompt, lets you edit that prompt, then launches an isolated same-session review branch. When the branch finishes, Pi collapses back with review findings, thereby giving you back your context window.
 
 ## Install
 
-From this package directory:
-
 ```bash
-bun install
-pi -e ./src/index.ts
-```
+# Install globally
+pi install git:github.com/vedang/pi-review-code
 
-For project-local discovery, keep the package configured through its `pi.extensions` field or install it as a Pi package.
+# Or install for just the current project
+pi install -l git:github.com/vedang/pi-review-code
+```
 
 ## Commands
 
@@ -24,6 +25,7 @@ For project-local discovery, keep the package configured through its `pi.extensi
 Review a free-form aspect of the codebase:
 
 ```text
+/review   # show help
 /review review the database schema and ensure column names are sensible
 ```
 
