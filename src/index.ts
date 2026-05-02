@@ -15,6 +15,7 @@ import {
 import { createReviewFlowController } from "./flow.js";
 import { buildReviewPromptDraftRequest } from "./prompts.js";
 import { registerReviewMessageRenderers } from "./renderers.js";
+import { showReviewInputWidget } from "./review-input-widget.js";
 import {
   type ReviewStateManager,
   createReviewStateManager,
@@ -126,7 +127,6 @@ const REVIEW_COMMANDS = {
     name: "review",
     description: "Start a context-rich code review",
     helpText: REVIEW_HELP_TEXT,
-    hasEmptyArgsHelp: true,
   },
   reviewDiffAgainst: {
     name: "review-diff-against",
@@ -194,6 +194,7 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
     createRunId: () => crypto.randomUUID(),
     getNow: () => Date.now(),
     getThinkingLevel: () => pi.getThinkingLevel() as PiReviewThinkingLevel,
+    showInputWidget: showReviewInputWidget,
   });
 
   pi.on("session_start", (_event, ctx) => {

@@ -59,13 +59,19 @@ function createRuntimeHarness() {
   const setActiveToolsCalls: string[][] = [];
   const appended: Array<{ customType: string; data: unknown }> = [];
   const notifications: Array<{ message: string; level: string }> = [];
+  const customWidgetCalls: Array<{ options: unknown }> = [];
   let activeTools = ["read", "bash", "add_review_comment"];
 
   const ctx = {
     hasUI: true,
+    model: { provider: "anthropic", id: "claude-sonnet" },
     ui: {
       notify: (message: string, level: string) => {
         notifications.push({ message, level });
+      },
+      custom: async (_createWidget: unknown, options: unknown) => {
+        customWidgetCalls.push({ options });
+        return { submitted: false };
       },
     },
     sessionManager: {
@@ -129,6 +135,7 @@ function createRuntimeHarness() {
     setActiveToolsCalls,
     appended,
     notifications,
+    customWidgetCalls,
     ctx,
   };
 }
@@ -188,6 +195,31 @@ test("/review-fix shows help with empty args before runtime validation", async (
 
   assertSingleNotification(harness, REVIEW_FIX_HELP_TEXT);
 });
+
+for (const commandName of [
+  "review",
+  "review-diff-against",
+  "review-pr",
+] as const) {
+  test(`/${commandName} opens runtime input widget`, async () => {
+    const harness = createRuntimeHarness();
+
+    await runCommand(harness, commandName);
+
+    assert.equal(harness.customWidgetCalls.length, 1);
+    assert.deepEqual(harness.customWidgetCalls[0]?.options, {
+      overlay: true,
+      overlayOptions: {
+        width: "80%",
+        minWidth: 48,
+        maxHeight: "85%",
+        anchor: "center",
+        margin: 2,
+      },
+    });
+    assertSingleNotification(harness, "Review cancelled.");
+  });
+}
 
 test("extension abandons persisted active review state on session_start", async () => {
   const harness = createRuntimeHarness();
