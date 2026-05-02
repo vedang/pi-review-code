@@ -144,11 +144,12 @@ test("review summary renderer shows findings compactly", () => {
     ?.render(120)
     .join("\n");
 
-  assert.match(rendered ?? "", /Review review-1/);
+  assert.match(rendered ?? "", /Review findings review-1/);
   assert.match(rendered ?? "", /2 finding/);
   assert.match(rendered ?? "", /P1 comment-1/);
   assert.match(rendered ?? "", /src\/auth\.ts:42-45/);
   assert.match(rendered ?? "", /First line only/);
+  assert.match(rendered ?? "", /expand for full finding text/);
   assert.doesNotMatch(rendered ?? "", /Second line only when expanded/);
 
   const expanded = renderer(
@@ -163,7 +164,9 @@ test("review summary renderer shows findings compactly", () => {
     ?.render(120)
     .join("\n");
 
+  assert.match(expanded ?? "", /Review findings review-1/);
   assert.match(expanded ?? "", /Second line only when expanded/);
+  assert.doesNotMatch(expanded ?? "", /expand for full finding text/);
 });
 
 test("review-fix summary renderer includes source review and agent summary", () => {

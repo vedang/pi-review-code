@@ -61,6 +61,8 @@ function buildReviewRubric(): string {
     "P2: moderate maintainability or behavior risk.",
     "P3: minor polish and low-risk issues.",
     "Do not batch unrelated issues.",
+    "Focus on issues the author would likely fix.",
+    "Use the smallest relevant line range for each finding reference.",
     "Use add_review_comment for each actionable finding.",
   ].join("\n");
 }

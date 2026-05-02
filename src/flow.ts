@@ -900,7 +900,7 @@ function buildSummaryMessageContent(
 ): string {
   if (summary.details.kind === "review") {
     const count = summary.details.comments.length;
-    return `Review ${summary.details.runId} completed with ${count} finding${count === 1 ? "" : "s"}.`;
+    return `Review findings ${summary.details.runId} completed with ${count} finding${count === 1 ? "" : "s"}.`;
   }
 
   const count = summary.details.comments.length;

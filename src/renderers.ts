@@ -168,13 +168,17 @@ function formatComments(
     (comment) => `- ${formatComment(comment, expanded, theme)}`,
   );
 
-  if (!expanded && comments.length > visibleComments.length) {
-    lines.push(
-      theme.fg(
-        "dim",
-        `… ${comments.length - visibleComments.length} more; expand for all findings`,
-      ),
-    );
+  if (!expanded) {
+    if (comments.length > visibleComments.length) {
+      lines.push(
+        theme.fg(
+          "dim",
+          `… ${comments.length - visibleComments.length} more; expand for full finding text`,
+        ),
+      );
+    } else {
+      lines.push(theme.fg("dim", "… expand for full finding text"));
+    }
   }
 
   return lines;
@@ -226,7 +230,7 @@ export function renderReviewSummaryMessage(
   }
 
   const lines = [
-    `${theme.fg("success", theme.bold("Review"))} ${theme.fg("muted", details.runId)} — ${formatFindingCount(details.comments.length)}`,
+    `${theme.fg("success", theme.bold("Review findings"))} ${theme.fg("muted", details.runId)} — ${formatFindingCount(details.comments.length)}`,
     `Target: ${details.targetHint}`,
     "",
     ...formatComments(details.comments, expanded, theme),

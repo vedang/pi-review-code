@@ -448,6 +448,10 @@ test("review flow emits custom prompt and summary messages for renderers", async
 
   assert.equal(harness.sentMessages.length, 2);
   assert.equal(harness.sentMessages[1]?.customType, REVIEW_SUMMARY_ENTRY_TYPE);
+  assert.equal(
+    harness.sentMessages[1]?.content,
+    "Review findings review-1 completed with 1 finding.",
+  );
   assert.equal(harness.sentMessages[1]?.display, true);
   assert.match(
     JSON.stringify(harness.sentMessages[1]?.details),
