@@ -82,7 +82,7 @@ const ACTIVE_FIELDS: ActiveField[] = ["findings", "context", "actions"];
 const REVIEW_FIX_CONTEXT_LABEL =
   "additional context for the fix loop (optional)";
 const REVIEW_FIX_KEY_HINT =
-  "Up/Down move • Space toggle • a select all open • Tab/Shift+Tab switch area • Ctrl+S submit • Esc cancel";
+  "Up/Down move • Space toggle • a select all open • Tab/Shift+Tab switch area • Enter/Ctrl+S submit • Alt+Enter newline • Esc cancel";
 
 export function normalizeReviewFixWidgetSelection(
   input: ReviewFixWidgetSelectionInput,
@@ -243,7 +243,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       paddingX: 1,
     });
     this.contextEditor.setText(config.initialFixContext ?? "");
-    this.contextEditor.onSubmit = () => this.submit();
+    this.contextEditor.onSubmit = (fixContext) => this.submit(fixContext);
     this.contextEditor.onChange = () => this.handleContextChange();
 
     this.selectedFindingIds = new Set(
@@ -614,15 +614,16 @@ class ReviewFixWidgetComponent implements Component, Focusable {
     this.requestRender();
   }
 
-  private submit(): void {
+  private submit(fixContext = this.contextEditor.getExpandedText()): void {
     const normalized = normalizeReviewFixWidgetSelection({
       reviewRunId: this.config.reviewRunId,
       findings: this.config.findings,
       selectedFindingIds: [...this.selectedFindingIds],
-      fixContext: this.contextEditor.getExpandedText(),
+      fixContext,
     });
 
     if (!normalized.ok) {
+      this.contextEditor.setText(fixContext);
       this.validationMessage = normalized.error;
       this.requestRender();
       return;

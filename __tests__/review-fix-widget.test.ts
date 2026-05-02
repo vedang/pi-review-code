@@ -86,6 +86,7 @@ test("review fix widget renders header, metadata, findings, and context editor",
   assert.ok(text.includes("[x] P1 finding-a"));
   assert.ok(text.includes("[−] fixed P2 finding-b"));
   assert.ok(text.includes("additional context for the fix loop (optional)"));
+  assert.ok(text.includes("Alt+Enter newline"));
   assert.ok(text.includes("Keep public API stable."));
 });
 
@@ -218,6 +219,95 @@ test("long finding lists scroll and keep active row visible", () => {
   assert.ok(text.includes("showing 3-10 of 12"));
   assert.ok(text.includes("› [ ] P1 finding-10"));
   assert.ok(!text.includes("finding-1 src/auth.ts:42-45"));
+});
+
+test("Tab and Shift+Tab cycle focus between findings, context, and actions", () => {
+  const { component } = createComponent();
+  component.focused = true;
+
+  assert.ok(component.render(72).some((line) => line.includes("▶ findings")));
+
+  component.handleInput?.("\t");
+  assert.ok(
+    component
+      .render(72)
+      .some((line) =>
+        line.includes("▶ additional context for the fix loop (optional)"),
+      ),
+  );
+
+  component.handleInput?.("\t");
+  assert.ok(component.render(72).some((line) => line.includes("▶  Start fix")));
+
+  component.handleInput?.("\x1b[Z");
+  assert.ok(
+    component
+      .render(72)
+      .some((line) =>
+        line.includes("▶ additional context for the fix loop (optional)"),
+      ),
+  );
+});
+
+test("context editor submits trimmed expanded paste text", () => {
+  const pastedContext = Array.from(
+    { length: 11 },
+    (_value, index) => `fix note ${index + 1}`,
+  ).join("\n");
+  const { component, results } = createComponent({
+    ...baseConfig,
+    initialSelectedFindingIds: ["finding-a"],
+    initialFixContext: undefined,
+  });
+
+  component.handleInput?.("\t");
+  component.handleInput?.(`\x1b[200~  ${pastedContext}  \x1b[201~`);
+  component.handleInput?.("\r");
+
+  assert.deepEqual(results, [
+    {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["finding-a"],
+      fixContext: pastedContext,
+    },
+  ]);
+});
+
+test("context editor keeps text when Enter submission fails validation", () => {
+  const { component, results } = createComponent({
+    ...baseConfig,
+    initialSelectedFindingIds: [],
+    initialFixContext: undefined,
+  });
+
+  component.handleInput?.("\t");
+  component.handleInput?.("Preserve this fix note.");
+  component.handleInput?.("\r");
+
+  assert.deepEqual(results, []);
+  const text = component.render(72).join("\n");
+  assert.ok(text.includes("Select at least one finding to fix."));
+  assert.ok(text.includes("Preserve this fix note."));
+});
+
+test("action row can cancel after keyboard navigation", () => {
+  const { component, results } = createComponent();
+
+  component.handleInput?.("\t");
+  component.handleInput?.("\t");
+  component.handleInput?.("\x1b[C");
+  component.handleInput?.("\r");
+
+  assert.deepEqual(results, [{ submitted: false }]);
+});
+
+test("Escape cancels the review fix widget", () => {
+  const { component, results } = createComponent();
+
+  component.handleInput?.("\x1b");
+
+  assert.deepEqual(results, [{ submitted: false }]);
 });
 
 test("review fix widget keeps rendered lines within width", () => {
