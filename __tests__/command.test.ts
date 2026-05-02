@@ -33,6 +33,16 @@ function reviewPrCommand(selector: string) {
   };
 }
 
+function reviewFixCommand(selector: unknown) {
+  return { kind: "review-fix", selector };
+}
+
+function assertUsageContains(usage: string, patterns: RegExp[]): void {
+  for (const pattern of patterns) {
+    assert.match(usage, pattern);
+  }
+}
+
 test("parses /review free-form requests as prompt targets", () => {
   const cases = [
     [
@@ -115,21 +125,18 @@ for (const testCase of singleTargetCommandCases) {
 }
 
 test("review-specific usage constants mention renamed commands", () => {
-  assert.match(REVIEW_USAGE, /\/review <review request>/);
-  assert.match(REVIEW_USAGE, /\/review-diff-against <ref>/);
-  assert.match(
-    REVIEW_USAGE,
+  assertUsageContains(REVIEW_USAGE, [
+    /\/review <review request>/,
+    /\/review-diff-against <ref>/,
     /\/review-pr <github-url\|gitlab-url\|github-number>/,
-  );
-  assert.match(
-    REVIEW_USAGE,
     /\/review-fix \[latest\|<review-run-id>\|<finding-id>\]/,
-  );
-  assert.match(REVIEW_DIFF_AGAINST_USAGE, /\/review-diff-against <ref>/);
-  assert.match(
-    REVIEW_PR_USAGE,
+  ]);
+  assertUsageContains(REVIEW_DIFF_AGAINST_USAGE, [
+    /\/review-diff-against <ref>/,
+  ]);
+  assertUsageContains(REVIEW_PR_USAGE, [
     /\/review-pr <github-url\|gitlab-url\|github-number>/,
-  );
+  ]);
 });
 
 test("rejects unterminated quotes", () => {
@@ -146,30 +153,18 @@ test("rejects unterminated quotes", () => {
 });
 
 test("parses /review-fix selectors", () => {
-  assert.deepEqual(parseReviewFixArgs(""), {
-    kind: "review-fix",
-    selector: { kind: "help" },
-  });
-  assert.deepEqual(parseReviewFixArgs("latest"), {
-    kind: "review-fix",
-    selector: { kind: "latest" },
-  });
-  assert.deepEqual(parseReviewFixArgs("rev_20260501_abc"), {
-    kind: "review-fix",
-    selector: { kind: "id", id: "rev_20260501_abc" },
-  });
-  assert.deepEqual(parseReviewFixArgs('"finding id"'), {
-    kind: "review-fix",
-    selector: { kind: "id", id: "finding id" },
-  });
-  assert.deepEqual(parseReviewFixArgs("run rev_20260501_abc"), {
-    kind: "review-fix",
-    selector: { kind: "run-id", runId: "rev_20260501_abc" },
-  });
-  assert.deepEqual(parseReviewFixArgs("finding 5044ff4b"), {
-    kind: "review-fix",
-    selector: { kind: "finding-id", findingId: "5044ff4b" },
-  });
+  const cases = [
+    ["", { kind: "help" }],
+    ["latest", { kind: "latest" }],
+    ["rev_20260501_abc", { kind: "id", id: "rev_20260501_abc" }],
+    ['"finding id"', { kind: "id", id: "finding id" }],
+    ["run rev_20260501_abc", { kind: "run-id", runId: "rev_20260501_abc" }],
+    ["finding 5044ff4b", { kind: "finding-id", findingId: "5044ff4b" }],
+  ] as const;
+
+  for (const [input, selector] of cases) {
+    assert.deepEqual(parseReviewFixArgs(input), reviewFixCommand(selector));
+  }
 });
 
 test("rejects invalid /review-fix selectors", () => {

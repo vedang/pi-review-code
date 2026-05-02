@@ -47,6 +47,18 @@ function reviewSummaryEntry(runId: string, comments: ReviewComment[]) {
   };
 }
 
+function assertSelectedSummary(
+  selected: ReturnType<typeof selectReviewSummaryForFix>,
+  expectedRunId: string,
+  expectedCommentIds: string[],
+): void {
+  assert.equal(selected?.runId, expectedRunId);
+  assert.deepEqual(
+    selected?.comments.map((item) => item.id),
+    expectedCommentIds,
+  );
+}
+
 test("selectReviewSummaryForFix chooses latest completed review with comments", () => {
   const selected = selectReviewSummaryForFix(
     [
@@ -61,11 +73,7 @@ test("selectReviewSummaryForFix chooses latest completed review with comments", 
     { kind: "latest" },
   );
 
-  assert.equal(selected?.runId, "review-2");
-  assert.deepEqual(
-    selected?.comments.map((item) => item.id),
-    ["new"],
-  );
+  assertSelectedSummary(selected, "review-2", ["new"]);
 });
 
 test("selectReviewSummaryForFix finds explicit review run", () => {
@@ -81,11 +89,7 @@ test("selectReviewSummaryForFix finds explicit review run", () => {
     { kind: "run-id", runId: "review-1" },
   );
 
-  assert.equal(selected?.runId, "review-1");
-  assert.deepEqual(
-    selected?.comments.map((item) => item.id),
-    ["one"],
-  );
+  assertSelectedSummary(selected, "review-1", ["one"]);
 });
 
 test("selectReviewSummaryForFix can select one finding by id", () => {
@@ -102,11 +106,7 @@ test("selectReviewSummaryForFix can select one finding by id", () => {
     { kind: "finding-id", findingId: "finding-two" },
   );
 
-  assert.equal(selected?.runId, "review-1");
-  assert.deepEqual(
-    selected?.comments.map((item) => item.id),
-    ["finding-two"],
-  );
+  assertSelectedSummary(selected, "review-1", ["finding-two"]);
 });
 
 test("selectReviewSummaryForFix treats ambiguous id as finding before run", () => {
@@ -122,11 +122,7 @@ test("selectReviewSummaryForFix treats ambiguous id as finding before run", () =
     { kind: "id", id: "review-2" },
   );
 
-  assert.equal(selected?.runId, "review-1");
-  assert.deepEqual(
-    selected?.comments.map((item) => item.id),
-    ["review-2"],
-  );
+  assertSelectedSummary(selected, "review-1", ["review-2"]);
 });
 
 test("selectReviewSummaryForFix falls back to run for ambiguous id", () => {
@@ -143,11 +139,7 @@ test("selectReviewSummaryForFix falls back to run for ambiguous id", () => {
     { kind: "id", id: "review-1" },
   );
 
-  assert.equal(selected?.runId, "review-1");
-  assert.deepEqual(
-    selected?.comments.map((item) => item.id),
-    ["finding-one", "finding-two"],
-  );
+  assertSelectedSummary(selected, "review-1", ["finding-one", "finding-two"]);
 });
 
 test("buildReviewFixPrompt lists review comments one by one with refs", () => {
@@ -298,6 +290,25 @@ function createHarness(options: HarnessOptions = {}) {
   };
 }
 
+function assertFixRunStarted(
+  harness: ReturnType<typeof createHarness>,
+  expectedCommentIds: string[],
+): void {
+  assert.deepEqual(harness.startedFixRuns, [
+    {
+      runId: "fix-1",
+      originLeafId: "leaf-fix-origin",
+      targetHint: "review auth boundaries",
+      reviewPrompt: harness.sentUserMessages[0],
+      originModelProvider: "anthropic",
+      originModelId: "claude-sonnet",
+      originThinkingLevel: "medium",
+      sourceReviewRunId: "review-1",
+      commentIds: expectedCommentIds,
+    },
+  ]);
+}
+
 test("review-fix without arguments shows help without launching", async () => {
   const harness = createHarness();
 
@@ -317,19 +328,7 @@ test("review-fix launches fix branch for latest review comments", async () => {
 
   assert.equal(harness.sentUserMessages.length, 1);
   assert.match(harness.sentUserMessages[0] ?? "", /comment-1/);
-  assert.deepEqual(harness.startedFixRuns, [
-    {
-      runId: "fix-1",
-      originLeafId: "leaf-fix-origin",
-      targetHint: "review auth boundaries",
-      reviewPrompt: harness.sentUserMessages[0],
-      originModelProvider: "anthropic",
-      originModelId: "claude-sonnet",
-      originThinkingLevel: "medium",
-      sourceReviewRunId: "review-1",
-      commentIds: ["comment-1"],
-    },
-  ]);
+  assertFixRunStarted(harness, ["comment-1"]);
   assert.deepEqual(harness.notifications, [
     { message: "Fix branch started: fix-1", level: "info" },
   ]);
@@ -354,19 +353,7 @@ test("review-fix launches fix branch for one finding id", async () => {
   assert.equal(harness.sentUserMessages.length, 1);
   assert.doesNotMatch(harness.sentUserMessages[0] ?? "", /finding-one/);
   assert.match(harness.sentUserMessages[0] ?? "", /finding-two/);
-  assert.deepEqual(harness.startedFixRuns, [
-    {
-      runId: "fix-1",
-      originLeafId: "leaf-fix-origin",
-      targetHint: "review auth boundaries",
-      reviewPrompt: harness.sentUserMessages[0],
-      originModelProvider: "anthropic",
-      originModelId: "claude-sonnet",
-      originThinkingLevel: "medium",
-      sourceReviewRunId: "review-1",
-      commentIds: ["finding-two"],
-    },
-  ]);
+  assertFixRunStarted(harness, ["finding-two"]);
 });
 
 test("review-fix reports missing review summary without launching", async () => {

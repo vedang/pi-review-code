@@ -5,33 +5,33 @@ import type {
   ReviewTarget,
 } from "./types.js";
 
-export const REVIEW_USAGE = [
-  "Usage:",
+function formatUsage(...lines: string[]): string {
+  return ["Usage:", ...lines].join("\n");
+}
+
+export const REVIEW_USAGE = formatUsage(
   "  /review <review request>",
   "  /review-fix [latest|<review-run-id>|<finding-id>]",
   "  /review-diff-against <ref>",
   "  /review-pr <github-url|gitlab-url|github-number>",
-].join("\n");
+);
 
-export const REVIEW_DIFF_AGAINST_USAGE = [
-  "Usage:",
+export const REVIEW_DIFF_AGAINST_USAGE = formatUsage(
   "  /review-diff-against <ref>",
-].join("\n");
+);
 
-export const REVIEW_PR_USAGE = [
-  "Usage:",
+export const REVIEW_PR_USAGE = formatUsage(
   "  /review-pr <github-url|gitlab-url|github-number>",
-].join("\n");
+);
 
-export const REVIEW_FIX_USAGE = [
-  "Usage:",
+export const REVIEW_FIX_USAGE = formatUsage(
   "  /review-fix",
   "  /review-fix latest",
   "  /review-fix <review-run-id>",
   "  /review-fix <finding-id>",
   "  /review-fix run <review-run-id>",
   "  /review-fix finding <finding-id>",
-].join("\n");
+);
 
 const UNTERMINATED_QUOTE_ERROR = "Unterminated quote in command arguments.";
 
@@ -106,6 +106,17 @@ function tokenizeCommandArgs(input: string): string[] {
 
 function isBlank(value: string | undefined): boolean {
   return value === undefined || value.trim().length === 0;
+}
+
+function requireNonBlank(
+  value: string | undefined,
+  errorMessage: string,
+): string {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed.length === 0) {
+    throw new Error(errorMessage);
+  }
+  return trimmed;
 }
 
 function requireSingleArg(
@@ -194,10 +205,7 @@ function parseReviewFixSelector(args: string[]): ReviewFixSelector {
   }
 
   if (args.length === 1) {
-    const selectorText = args[0]?.trim() ?? "";
-    if (isBlank(selectorText)) {
-      throw new Error(REVIEW_FIX_USAGE);
-    }
+    const selectorText = requireNonBlank(args[0], REVIEW_FIX_USAGE);
 
     if (selectorText === "latest") {
       return { kind: "latest" };
@@ -215,11 +223,7 @@ function parseReviewFixSelector(args: string[]): ReviewFixSelector {
 
   if (args.length === 2) {
     const selectorType = args[0]?.trim() ?? "";
-    const selectorText = args[1]?.trim() ?? "";
-
-    if (isBlank(selectorText)) {
-      throw new Error(REVIEW_FIX_USAGE);
-    }
+    const selectorText = requireNonBlank(args[1], REVIEW_FIX_USAGE);
 
     if (selectorType === "run") {
       return {

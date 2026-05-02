@@ -31,24 +31,17 @@ The prompt draft turns the request into concrete inspection guidance.
 
 ### `/review-fix [latest|<review-run-id>|<finding-id>]`
 
-Print command help:
+Start a same-session fix branch for review comments, or omit arguments for usage help:
 
 ```text
-/review-fix
+/review-fix                       # show help
+/review-fix latest                # latest completed review
+/review-fix run <review-run-id>   # specific review run
+/review-fix finding <finding-id>  # one finding
+/review-fix <id>                  # finding first, then review run
 ```
 
-Start a same-session fix branch for comments from a completed review:
-
-```text
-/review-fix latest
-/review-fix run <review-run-id>
-/review-fix finding <finding-id>
-/review-fix <review-run-id>
-/review-fix <finding-id>
-```
-
-If a single `<id>` matches both a finding and a run, `/review-fix <id>` targets the finding.
-The fix prompt lists selected comments one by one with priorities and references. The fix branch collapses back with a summary of attempted fixes.
+The fix prompt lists selected comments with priorities and references. The fix branch collapses back with a summary of attempted fixes.
 
 ### `/review-diff-against <ref>`
 

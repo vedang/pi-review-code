@@ -144,6 +144,14 @@ async function runCommand(
   await handler(args, harness.ctx);
 }
 
+function assertSingleNotification(
+  harness: Harness | RuntimeHarness,
+  message: string,
+  level = "info",
+): void {
+  assert.deepEqual(harness.notifications, [{ message, level }]);
+}
+
 test("extension registers review commands and message renderers", () => {
   const harness = createHarness();
 
@@ -169,9 +177,7 @@ for (const [commandName, expectedHelp] of scaffoldHelpCases) {
 
     await runCommand(harness, commandName);
 
-    assert.deepEqual(harness.notifications, [
-      { message: expectedHelp, level: "info" },
-    ]);
+    assertSingleNotification(harness, expectedHelp);
   });
 }
 
@@ -180,9 +186,7 @@ test("/review-fix shows help with empty args before runtime validation", async (
 
   await runCommand(harness, "review-fix");
 
-  assert.deepEqual(harness.notifications, [
-    { message: REVIEW_FIX_HELP_TEXT, level: "info" },
-  ]);
+  assertSingleNotification(harness, REVIEW_FIX_HELP_TEXT);
 });
 
 test("extension abandons persisted active review state on session_start", async () => {
