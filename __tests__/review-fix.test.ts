@@ -629,6 +629,50 @@ test("review-fix launches fix branch for one finding id", async () => {
   assertFixRunStarted(harness, ["finding-two"]);
 });
 
+test("review-fix launches fix branch for multiple finding ids", async () => {
+  const harness = createHarness({
+    entries: [
+      reviewSummaryEntry("review-1", [
+        comment({ id: "finding-one", runId: "review-1" }),
+        comment({
+          id: "finding-two",
+          runId: "review-1",
+          comment: "Logout leaves stale cache.",
+        }),
+        comment({
+          id: "finding-three",
+          runId: "review-1",
+          comment: "Metrics export drops labels.",
+        }),
+      ]),
+    ],
+  });
+
+  await harness.controller.handleReviewFixCommand(
+    "finding finding-one finding-two",
+    harness.ctx,
+  );
+
+  assert.equal(harness.sentUserMessages.length, 1);
+  assert.match(harness.sentUserMessages[0] ?? "", /finding-one/);
+  assert.match(harness.sentUserMessages[0] ?? "", /finding-two/);
+  assert.doesNotMatch(harness.sentUserMessages[0] ?? "", /finding-three/);
+  assertFixRunStarted(harness, ["finding-one", "finding-two"]);
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.details, {
+    kind: "prompt",
+    mode: "fix",
+    runId: "fix-1",
+    targetHint: "review auth boundaries",
+    reviewPrompt: harness.sentUserMessages[0],
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["finding-one", "finding-two"],
+  });
+});
+
 test("review-fix reports missing review summary without launching", async () => {
   const harness = createHarness({ entries: [] });
 
