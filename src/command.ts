@@ -200,6 +200,46 @@ function parseReviewSelectorArgs(
   };
 }
 
+function parseFindingIds(args: string[]): string[] {
+  const rawFindingIds = args;
+  if (rawFindingIds.length === 0) {
+    throw new Error(REVIEW_FIX_USAGE);
+  }
+
+  const findingIds: string[] = [];
+  const seenFindingIds = new Set<string>();
+
+  for (let index = 0; index < rawFindingIds.length; index += 1) {
+    const rawFindingId = rawFindingIds[index] ?? "";
+    const parts = rawFindingId.split(",");
+
+    if (parts[0] === "") {
+      throw new Error(REVIEW_FIX_USAGE);
+    }
+
+    const endsWithComma = parts.at(-1) === "";
+    if (endsWithComma) {
+      if (index === rawFindingIds.length - 1) {
+        throw new Error(REVIEW_FIX_USAGE);
+      }
+      parts.pop();
+    }
+
+    for (const findingId of parts) {
+      if (findingId === "") {
+        throw new Error(REVIEW_FIX_USAGE);
+      }
+
+      if (!seenFindingIds.has(findingId)) {
+        seenFindingIds.add(findingId);
+        findingIds.push(findingId);
+      }
+    }
+  }
+
+  return findingIds;
+}
+
 function parseReviewFixSelector(args: string[]): ReviewFixSelector {
   if (args.length === 0) {
     return { kind: "help" };
@@ -212,6 +252,10 @@ function parseReviewFixSelector(args: string[]): ReviewFixSelector {
       return { kind: "latest" };
     }
 
+    if (selectorText === "list") {
+      return { kind: "list" };
+    }
+
     if (selectorText === "run" || selectorText === "finding") {
       throw new Error(REVIEW_FIX_USAGE);
     }
@@ -222,21 +266,36 @@ function parseReviewFixSelector(args: string[]): ReviewFixSelector {
     };
   }
 
-  if (args.length === 2) {
+  if (args.length >= 2) {
     const selectorType = args[0]?.trim() ?? "";
-    const selectorText = requireNonBlank(args[1], REVIEW_FIX_USAGE);
+    const selectorArgs = args.slice(1);
 
     if (selectorType === "run") {
+      if (selectorArgs.length !== 1) {
+        throw new Error(REVIEW_FIX_USAGE);
+      }
+
       return {
         kind: "run-id",
-        runId: selectorText,
+        runId: requireNonBlank(selectorArgs[0], REVIEW_FIX_USAGE),
       };
     }
 
     if (selectorType === "finding") {
+      const usesMultiFindingSyntax =
+        selectorArgs.length > 1 || (selectorArgs[0]?.includes(",") ?? false);
+      const findingIds = parseFindingIds(selectorArgs);
+
+      if (!usesMultiFindingSyntax && findingIds.length === 1) {
+        return {
+          kind: "finding-id",
+          findingId: findingIds[0] ?? "",
+        };
+      }
+
       return {
-        kind: "finding-id",
-        findingId: selectorText,
+        kind: "finding-ids",
+        findingIds,
       };
     }
   }

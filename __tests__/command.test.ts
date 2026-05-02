@@ -160,10 +160,31 @@ test("parses /review-fix selectors", () => {
   const cases = [
     ["", { kind: "help" }],
     ["latest", { kind: "latest" }],
+    ["list", { kind: "list" }],
     ["rev_20260501_abc", { kind: "id", id: "rev_20260501_abc" }],
     ['"finding id"', { kind: "id", id: "finding id" }],
     ["run rev_20260501_abc", { kind: "run-id", runId: "rev_20260501_abc" }],
     ["finding 5044ff4b", { kind: "finding-id", findingId: "5044ff4b" }],
+    [
+      "finding finding-a finding-b",
+      { kind: "finding-ids", findingIds: ["finding-a", "finding-b"] },
+    ],
+    [
+      "finding finding-a,finding-b",
+      { kind: "finding-ids", findingIds: ["finding-a", "finding-b"] },
+    ],
+    [
+      "finding finding-a, finding-b",
+      { kind: "finding-ids", findingIds: ["finding-a", "finding-b"] },
+    ],
+    [
+      "finding finding-a finding-a finding-b",
+      { kind: "finding-ids", findingIds: ["finding-a", "finding-b"] },
+    ],
+    [
+      "finding finding-a finding-a",
+      { kind: "finding-ids", findingIds: ["finding-a"] },
+    ],
   ] as const;
 
   for (const [input, selector] of cases) {
@@ -180,6 +201,18 @@ test("rejects invalid /review-fix selectors", () => {
   );
   assert.throws(
     () => parseReviewFixArgs("one two"),
+    new Error(REVIEW_FIX_USAGE),
+  );
+  assert.throws(
+    () => parseReviewFixArgs("finding ,"),
+    new Error(REVIEW_FIX_USAGE),
+  );
+  assert.throws(
+    () => parseReviewFixArgs("finding finding-a,,finding-b"),
+    new Error(REVIEW_FIX_USAGE),
+  );
+  assert.throws(
+    () => parseReviewFixArgs("finding finding-a,"),
     new Error(REVIEW_FIX_USAGE),
   );
 });
