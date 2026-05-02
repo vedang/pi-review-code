@@ -10,9 +10,11 @@ import {
   REVIEW_SUMMARY_ENTRY_TYPE,
   buildFixBranchSummary,
   createReviewFlowController,
+  listUnfixedReviewFindings,
   selectReviewSummaryForFix,
 } from "../src/flow.js";
 import { buildReviewFixPrompt } from "../src/prompts.js";
+import { REVIEW_STATE_ENTRY_TYPE } from "../src/state.js";
 import type { ReviewComment } from "../src/types.js";
 
 function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
@@ -29,7 +31,11 @@ function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
   };
 }
 
-function reviewSummaryEntry(runId: string, comments: ReviewComment[]) {
+function reviewSummaryEntry(
+  runId: string,
+  comments: ReviewComment[],
+  options: { completedAt?: number; targetHint?: string } = {},
+) {
   return {
     type: "custom",
     customType: REVIEW_SUMMARY_ENTRY_TYPE,
@@ -38,12 +44,32 @@ function reviewSummaryEntry(runId: string, comments: ReviewComment[]) {
       details: {
         kind: "review",
         runId,
-        targetHint: "review auth boundaries",
+        targetHint: options.targetHint ?? "review auth boundaries",
         reviewPrompt: "Review auth boundaries",
-        completedAt: runId === "review-2" ? 200 : 100,
+        completedAt: options.completedAt ?? (runId === "review-2" ? 200 : 100),
         comments,
       },
     },
+  };
+}
+
+function fixSummaryEntry(
+  runId: string,
+  sourceReviewRunId: string,
+  comments: ReviewComment[],
+) {
+  return {
+    type: "custom",
+    customType: REVIEW_FIX_SUMMARY_ENTRY_TYPE,
+    data: buildFixBranchSummary({
+      runId,
+      sourceReviewRunId,
+      targetHint: "review auth boundaries",
+      fixPrompt: "Fix prompt",
+      comments,
+      agentSummary: "Fixed selected findings.",
+      completedAt: 300,
+    }),
   };
 }
 
@@ -140,6 +166,130 @@ test("selectReviewSummaryForFix falls back to run for ambiguous id", () => {
   );
 
   assertSelectedSummary(selected, "review-1", ["finding-one", "finding-two"]);
+});
+
+test("listUnfixedReviewFindings hides findings from completed fix summaries", () => {
+  const findingA = comment({ id: "finding-a", runId: "review-1" });
+  const findingB = comment({ id: "finding-b", runId: "review-1" });
+  const findingC = comment({ id: "finding-c", runId: "review-1" });
+
+  const result = listUnfixedReviewFindings([
+    reviewSummaryEntry("review-1", [findingA, findingB, findingC]),
+    fixSummaryEntry("fix-1", "review-1", [findingA, findingC]),
+  ]);
+
+  assert.equal(result.totalFindings, 3);
+  assert.deepEqual(
+    result.unfixed.map((item) => item.comment.id),
+    ["finding-b"],
+  );
+  assert.equal(result.unfixed[0]?.reviewRunId, "review-1");
+});
+
+test("listUnfixedReviewFindings orders newest reviews first", () => {
+  const result = listUnfixedReviewFindings([
+    reviewSummaryEntry("review-1", [comment({ id: "old", runId: "review-1" })]),
+    reviewSummaryEntry("review-2", [comment({ id: "new", runId: "review-2" })]),
+  ]);
+
+  assert.deepEqual(
+    result.unfixed.map((item) => `${item.reviewRunId}:${item.comment.id}`),
+    ["review-2:new", "review-1:old"],
+  );
+});
+
+test("listUnfixedReviewFindings keys fixed findings by review run", () => {
+  const first = comment({ id: "same-id", runId: "review-1" });
+  const second = comment({ id: "same-id", runId: "review-2" });
+
+  const result = listUnfixedReviewFindings([
+    reviewSummaryEntry("review-1", [first]),
+    reviewSummaryEntry("review-2", [second]),
+    fixSummaryEntry("fix-1", "review-1", [first]),
+  ]);
+
+  assert.equal(result.totalFindings, 2);
+  assert.deepEqual(
+    result.unfixed.map((item) => `${item.reviewRunId}:${item.comment.id}`),
+    ["review-2:same-id"],
+  );
+});
+
+test("listUnfixedReviewFindings ignores malformed fix summaries", () => {
+  const finding = comment({ id: "finding-a", runId: "review-1" });
+
+  const result = listUnfixedReviewFindings([
+    reviewSummaryEntry("review-1", [finding]),
+    {
+      type: "custom",
+      customType: REVIEW_FIX_SUMMARY_ENTRY_TYPE,
+      data: {
+        details: {
+          kind: "fix",
+          runId: "fix-1",
+          sourceReviewRunId: 123,
+          targetHint: "review auth boundaries",
+          fixPrompt: "Fix prompt",
+          completedAt: 300,
+          comments: [finding],
+          agentSummary: "Fixed selected findings.",
+        },
+      },
+    },
+  ]);
+
+  assert.equal(result.totalFindings, 1);
+  assert.deepEqual(
+    result.unfixed.map((item) => item.comment.id),
+    ["finding-a"],
+  );
+});
+
+test("listUnfixedReviewFindings ignores active fix state without summary", () => {
+  const finding = comment({ id: "finding-a", runId: "review-1" });
+
+  const result = listUnfixedReviewFindings([
+    reviewSummaryEntry("review-1", [finding]),
+    {
+      type: "custom",
+      customType: REVIEW_STATE_ENTRY_TYPE,
+      data: {
+        version: 1,
+        activeKind: "fix",
+        runId: "fix-1",
+        originLeafId: "leaf-fix-origin",
+        targetHint: "review auth boundaries",
+        reviewPrompt: "Fix prompt",
+        originModelProvider: "anthropic",
+        originModelId: "claude-sonnet",
+        originThinkingLevel: "medium",
+        sourceReviewRunId: "review-1",
+        commentIds: ["finding-a"],
+      },
+    },
+  ]);
+
+  assert.equal(result.totalFindings, 1);
+  assert.deepEqual(
+    result.unfixed.map((item) => item.comment.id),
+    ["finding-a"],
+  );
+});
+
+test("listUnfixedReviewFindings dedupes review summaries by newest completion", () => {
+  const stale = comment({ id: "stale", runId: "review-1" });
+  const fresh = comment({ id: "fresh", runId: "review-1" });
+
+  const result = listUnfixedReviewFindings([
+    reviewSummaryEntry("review-1", [stale], { completedAt: 100 }),
+    reviewSummaryEntry("review-1", [fresh], { completedAt: 200 }),
+  ]);
+
+  assert.equal(result.totalFindings, 1);
+  assert.deepEqual(
+    result.unfixed.map((item) => item.comment.id),
+    ["fresh"],
+  );
 });
 
 test("buildReviewFixPrompt lists review comments one by one with refs", () => {

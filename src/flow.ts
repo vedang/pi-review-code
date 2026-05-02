@@ -107,6 +107,13 @@ export type ReviewSummaryForFix = {
   comments: ReviewComment[];
 };
 
+export type ReviewFindingForFixList = {
+  reviewRunId: string;
+  targetHint: string;
+  completedAt: number;
+  comment: ReviewComment;
+};
+
 export type ReviewSessionBeforeTreeResult = {
   summary: {
     summary: string;
@@ -347,6 +354,12 @@ function parseReviewComment(value: unknown): ReviewComment | undefined {
 
 type ParsedReviewSummaryForFix = ReviewSummaryForFix & { order: number };
 
+type ParsedFixSummaryForFix = {
+  sourceReviewRunId: string;
+  commentIds: string[];
+  order: number;
+};
+
 function parseReviewSummaryForFixEntry(
   value: unknown,
   order: number,
@@ -406,6 +419,65 @@ function parseReviewSummaryForFixEntry(
   };
 }
 
+function parseFixSummaryForFixEntry(
+  value: unknown,
+  order: number,
+): ParsedFixSummaryForFix | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (
+    value.type !== "custom" ||
+    value.customType !== REVIEW_FIX_SUMMARY_ENTRY_TYPE
+  ) {
+    return undefined;
+  }
+
+  const data = isRecord(value.data) ? value.data : undefined;
+  if (data === undefined || !isRecord(data.details)) {
+    return undefined;
+  }
+
+  const details = data.details;
+  const rawSourceReviewRunId = details.sourceReviewRunId;
+
+  if (
+    typeof details.kind !== "string" ||
+    details.kind !== "fix" ||
+    typeof details.runId !== "string" ||
+    details.runId.trim().length === 0 ||
+    typeof rawSourceReviewRunId !== "string" ||
+    rawSourceReviewRunId.trim().length === 0 ||
+    typeof details.targetHint !== "string" ||
+    typeof details.fixPrompt !== "string" ||
+    typeof details.completedAt !== "number" ||
+    !Number.isFinite(details.completedAt) ||
+    typeof details.agentSummary !== "string"
+  ) {
+    return undefined;
+  }
+
+  const commentsRaw = Array.isArray(details.comments) ? details.comments : [];
+  const commentIds: string[] = [];
+
+  for (const raw of commentsRaw) {
+    const parsedComment = parseReviewComment(raw);
+    if (
+      parsedComment !== undefined &&
+      parsedComment.runId === rawSourceReviewRunId
+    ) {
+      commentIds.push(parsedComment.id);
+    }
+  }
+
+  return {
+    sourceReviewRunId: rawSourceReviewRunId,
+    commentIds,
+    order,
+  };
+}
+
 function chooseLatestReviewSummary(
   a: ParsedReviewSummaryForFix,
   b: ParsedReviewSummaryForFix,
@@ -426,6 +498,72 @@ function firstCommentForFindingId(
   findingId: string,
 ): ReviewComment | undefined {
   return summary.comments.find((comment) => comment.id === findingId);
+}
+
+function reviewFindingKey(reviewRunId: string, findingId: string): string {
+  return `${reviewRunId}:${findingId}`;
+}
+
+export function listUnfixedReviewFindings(entries: unknown[]): {
+  totalFindings: number;
+  unfixed: ReviewFindingForFixList[];
+} {
+  const reviewsByRunId = new Map<string, ParsedReviewSummaryForFix>();
+  const fixedFindingKeys = new Set<string>();
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const review = parseReviewSummaryForFixEntry(entries[index], index);
+    if (review !== undefined) {
+      const existing = reviewsByRunId.get(review.runId);
+      reviewsByRunId.set(
+        review.runId,
+        existing === undefined
+          ? review
+          : chooseLatestReviewSummary(review, existing),
+      );
+      continue;
+    }
+
+    const fix = parseFixSummaryForFixEntry(entries[index], index);
+    if (fix === undefined) {
+      continue;
+    }
+
+    for (const commentId of fix.commentIds) {
+      fixedFindingKeys.add(reviewFindingKey(fix.sourceReviewRunId, commentId));
+    }
+  }
+
+  const reviews = Array.from(reviewsByRunId.values()).sort((a, b) => {
+    if (a.completedAt !== b.completedAt) {
+      return b.completedAt - a.completedAt;
+    }
+
+    return b.order - a.order;
+  });
+
+  const totalFindings = reviews.reduce(
+    (count, review) => count + review.comments.length,
+    0,
+  );
+  const unfixed: ReviewFindingForFixList[] = [];
+
+  for (const review of reviews) {
+    for (const comment of review.comments) {
+      if (fixedFindingKeys.has(reviewFindingKey(review.runId, comment.id))) {
+        continue;
+      }
+
+      unfixed.push({
+        reviewRunId: review.runId,
+        targetHint: review.targetHint,
+        completedAt: review.completedAt,
+        comment,
+      });
+    }
+  }
+
+  return { totalFindings, unfixed };
 }
 
 export function selectReviewSummaryForFix(
