@@ -576,6 +576,7 @@ test("session_before_tree returns pending review summary in Pi event shape", asy
   const result = await harness.controller.handleSessionBeforeTree({
     preparation: {
       label: "review:review-1",
+      targetId: "leaf-origin",
       userWantsSummary: true,
     },
   } as never);
@@ -586,6 +587,41 @@ test("session_before_tree returns pending review summary in Pi event shape", asy
   );
   assert.match(result?.summary?.summary ?? "", /Token refresh can race/);
   assert.equal(result?.summary?.details?.kind, "review");
+});
+
+test("session_before_tree ignores review summary for mismatched target", async () => {
+  const harness = createHarness({ editorResult: "Edited review prompt" });
+
+  await harness.controller.handleReviewCommand(
+    "review auth boundaries",
+    harness.ctx,
+  );
+  await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
+    sessionManager: harness.ctx.sessionManager,
+  } as never);
+
+  const wrongTarget = await harness.controller.handleSessionBeforeTree({
+    preparation: {
+      label: "review:review-1",
+      targetId: "unrelated-leaf",
+      userWantsSummary: true,
+    },
+  } as never);
+
+  assert.equal(wrongTarget, undefined);
+
+  const rightTarget = await harness.controller.handleSessionBeforeTree({
+    preparation: {
+      label: "review:review-1",
+      targetId: "leaf-origin",
+      userWantsSummary: true,
+    },
+  } as never);
+
+  assert.match(
+    rightTarget?.summary?.summary ?? "",
+    /pi-review-code review review-1/,
+  );
 });
 
 test("review branch summary formats findings with references", () => {

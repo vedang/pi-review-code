@@ -438,6 +438,7 @@ test("session_before_tree returns pending review-fix summary", async () => {
   const result = await harness.controller.handleSessionBeforeTree({
     preparation: {
       label: "review-fix:fix-1",
+      targetId: "leaf-fix-origin",
       userWantsSummary: true,
     },
   } as never);
@@ -448,6 +449,38 @@ test("session_before_tree returns pending review-fix summary", async () => {
   );
   assert.match(result?.summary?.summary ?? "", /comment-1/);
   assert.equal(result?.summary?.details?.kind, "fix");
+});
+
+test("session_before_tree ignores review-fix summary for mismatched target", async () => {
+  const harness = createHarness();
+
+  await harness.controller.handleReviewFixCommand("latest", harness.ctx);
+  await harness.controller.handleAgentEnd(harness.createFixAgentEndEvent(), {
+    sessionManager: harness.ctx.sessionManager,
+  } as never);
+
+  const wrongTarget = await harness.controller.handleSessionBeforeTree({
+    preparation: {
+      label: "review-fix:fix-1",
+      targetId: "unrelated-leaf",
+      userWantsSummary: true,
+    },
+  } as never);
+
+  assert.equal(wrongTarget, undefined);
+
+  const rightTarget = await harness.controller.handleSessionBeforeTree({
+    preparation: {
+      label: "review-fix:fix-1",
+      targetId: "leaf-fix-origin",
+      userWantsSummary: true,
+    },
+  } as never);
+
+  assert.match(
+    rightTarget?.summary?.summary ?? "",
+    /pi-review-code review-fix fix-1/,
+  );
 });
 
 test("fix branch summary includes source review and agent result", () => {

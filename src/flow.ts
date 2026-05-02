@@ -597,6 +597,12 @@ const REVIEW_FIX_SUMMARY_ENTRY = "review-fix";
 
 type ActiveReviewRunState = ActiveReviewRun | ActiveFixRun;
 
+type PendingSummary = {
+  runId: string;
+  targetId: string;
+  summary: ReviewBranchSummary | FixBranchSummary;
+};
+
 function agentEndMatchesRun(
   event: unknown,
   run: ActiveReviewRunState,
@@ -705,10 +711,7 @@ export function createReviewFlowController(
   dependencies: ReviewFlowDependencies,
 ): ReviewFlowController {
   let activeRun: ActiveReviewRunState | null = null;
-  const pendingSummaries = new Map<
-    string,
-    ReviewBranchSummary | FixBranchSummary
-  >();
+  const pendingSummaries = new Map<string, PendingSummary>();
 
   async function launchReview(
     target: ReviewTarget,
@@ -1001,7 +1004,11 @@ export function createReviewFlowController(
         });
       }
 
-      pendingSummaries.set(run.runId, summary);
+      pendingSummaries.set(run.runId, {
+        runId: run.runId,
+        targetId: run.originLeafId,
+        summary,
+      });
 
       let collapseResult: { cancelled: boolean };
       const collapseLabel =
@@ -1049,8 +1056,13 @@ export function createReviewFlowController(
       }
 
       const runId = label.slice(`${prefix}:`.length);
-      const summary = pendingSummaries.get(runId);
-      if (summary === undefined) {
+      const pending = pendingSummaries.get(runId);
+      if (pending === undefined) {
+        return undefined;
+      }
+
+      const targetId = event.preparation.targetId;
+      if (typeof targetId !== "string" || targetId !== pending.targetId) {
         return undefined;
       }
 
@@ -1058,8 +1070,8 @@ export function createReviewFlowController(
 
       return {
         summary: {
-          summary: summary.summary,
-          details: summary.details,
+          summary: pending.summary.summary,
+          details: pending.summary.details,
         },
       };
     },
