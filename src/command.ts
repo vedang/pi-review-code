@@ -122,6 +122,22 @@ function requireSingleArg(
   return args[0].trim();
 }
 
+function withReviewContext(reviewContext?: string): { reviewContext?: string } {
+  const trimmed = reviewContext?.trim();
+  return trimmed === undefined || trimmed.length === 0
+    ? {}
+    : { reviewContext: trimmed };
+}
+
+function parseSingleValueTarget(
+  args: string[],
+  missingMessage: string,
+  extraMessage: string,
+  buildTarget: (value: string) => ReviewTarget,
+): ReviewTarget {
+  return buildTarget(requireSingleArg(args, missingMessage, extraMessage));
+}
+
 function parsePromptText(input: string): ReviewCommand {
   const args = tokenizeCommandArgs(input);
 
@@ -145,31 +161,29 @@ function parsePromptText(input: string): ReviewCommand {
 }
 
 function parseReviewDiffAgainstTargetArgs(args: string[]): ReviewTarget {
-  const ref = requireSingleArg(
+  return parseSingleValueTarget(
     args,
     "/review-diff-against requires a ref or change id.",
     "/review-diff-against accepts exactly one ref or change id.",
+    (ref) => ({
+      kind: "diff-against",
+      ref,
+      targetHint: ref,
+    }),
   );
-
-  return {
-    kind: "diff-against",
-    ref,
-    targetHint: ref,
-  };
 }
 
 function parseReviewPrTargetArgs(args: string[]): ReviewTarget {
-  const selector = requireSingleArg(
+  return parseSingleValueTarget(
     args,
     "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
     "/review-pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
+    (selector) => ({
+      kind: "pr",
+      selector,
+      targetHint: selector,
+    }),
   );
-
-  return {
-    kind: "pr",
-    selector,
-    targetHint: selector,
-  };
 }
 
 function parseReviewSelectorArgs(
@@ -193,17 +207,13 @@ export function buildReviewCommandFromInput(input: {
 }): ReviewCommand {
   const prompt = requireNonBlank(input.prompt, REVIEW_USAGE);
 
-  const reviewContext = input.reviewContext?.trim();
-
   return {
     kind: "review",
     target: {
       kind: "prompt",
       prompt,
       targetHint: prompt,
-      ...(reviewContext === undefined || reviewContext.length === 0
-        ? {}
-        : { reviewContext }),
+      ...withReviewContext(input.reviewContext),
     },
   };
 }
@@ -217,17 +227,13 @@ export function buildReviewDiffAgainstCommandFromInput(input: {
     "/review-diff-against requires a ref or change id.",
   );
 
-  const reviewContext = input.reviewContext?.trim();
-
   return {
     kind: "review",
     target: {
       kind: "diff-against",
       ref,
       targetHint: ref,
-      ...(reviewContext === undefined || reviewContext.length === 0
-        ? {}
-        : { reviewContext }),
+      ...withReviewContext(input.reviewContext),
     },
   };
 }
@@ -241,17 +247,13 @@ export function buildReviewPrCommandFromInput(input: {
     "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
   );
 
-  const reviewContext = input.reviewContext?.trim();
-
   return {
     kind: "review",
     target: {
       kind: "pr",
       selector,
       targetHint: selector,
-      ...(reviewContext === undefined || reviewContext.length === 0
-        ? {}
-        : { reviewContext }),
+      ...withReviewContext(input.reviewContext),
     },
   };
 }

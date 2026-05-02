@@ -22,35 +22,35 @@ pi install -l git:github.com/vedang/pi-review-code
 
 ### `/review [review request]`
 
-Open a review input form for a free-form aspect of the codebase:
+Review any aspect of the codebase:
 
 ```text
 /review
 /review review the database schema and ensure column names are sensible
 ```
 
-The form asks what to review and accepts optional context. Typed arguments prefill the required field so you can submit quickly or add context before prompt drafting.
+The form asks what to review and accepts optional context. Typed arguments prefill the required field.
 
 ### `/review-fix`
 
-Open a finding-selection widget for the latest completed review run. Select one or more findings, optionally add fix context, then start a same-session fix branch.
+Select findings from the latest completed review, optionally add fix context, then start a same-session fix branch.
 
-The fix prompt lists selected comments with priorities, references, and optional fix context. The fix branch collapses back with a summary of attempted fixes.
+The fix prompt lists selected comments with priorities, references, and optional fix context. The fix branch collapses back with a summary.
 
 ### `/review-diff-against [ref]`
 
-Open a review input form for the current local diff against a git ref:
+Review current local changes against a git ref:
 
 ```text
 /review-diff-against
 /review-diff-against origin/main
 ```
 
-The form asks for `ref:` and accepts optional context. Typed refs prefill the required field. The prompt draft includes changed files, diff stats, and safe command hints such as `git --no-pager diff <ref>`.
+The form asks for `ref:` and optional context. Typed refs prefill the field. Prompt drafts include changed files, diff stats, and safe command hints such as `git --no-pager diff <ref>`.
 
 ### `/review-pr [github-url|gitlab-url|github-number]`
 
-Open a review input form for a GitHub PR or GitLab MR through `gh`/`glab` metadata and diff commands:
+Review a GitHub PR or GitLab MR through `gh`/`glab` metadata and diff commands:
 
 ```text
 /review-pr
@@ -59,7 +59,7 @@ Open a review input form for a GitHub PR or GitLab MR through `gh`/`glab` metada
 /review-pr 123
 ```
 
-The form asks for `pr:` and accepts optional context. Typed selectors prefill the required field. Number-only selectors currently resolve GitHub PRs for the current repository. MVP behavior does not checkout or switch VCS branches.
+The form asks for `pr:` and optional context. Typed selectors prefill the field. Number-only selectors resolve GitHub PRs for the current repository. This does not checkout or switch VCS branches.
 
 ## Review lifecycle
 
@@ -81,7 +81,7 @@ The extension registers compact custom renderers for:
 - review summaries
 - review-fix summaries
 
-Collapsed views show target, run id, and first findings. Expanded views show full prompt or agent summary.
+Collapsed views show target, run id, and first findings; expanded views show full prompts or agent summaries.
 
 ## Finding priorities
 

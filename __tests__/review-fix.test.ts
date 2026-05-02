@@ -645,6 +645,36 @@ test("review-fix rejects stale widget finding after submit", async () => {
   ]);
 });
 
+test("review-fix rejects when newer same-run summary has no findings", async () => {
+  const staleFinding = comment({ id: "finding-one", runId: "review-1" });
+  const harness = createHarness({
+    entriesSequence: [
+      [reviewSummaryEntry("review-1", [staleFinding], { completedAt: 100 })],
+      [
+        reviewSummaryEntry("review-1", [staleFinding], { completedAt: 100 }),
+        reviewSummaryEntry("review-1", [], { completedAt: 200 }),
+      ],
+    ],
+    fixWidgetResult: {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["finding-one"],
+    },
+  });
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.startedFixRuns, []);
+  assert.deepEqual(harness.notifications, [
+    {
+      message:
+        "Cannot start review-fix: selected findings are no longer available.",
+      level: "error",
+    },
+  ]);
+});
+
 test("review-fix rejects already-fixed widget finding after submit", async () => {
   const finding = comment({ id: "finding-one", runId: "review-1" });
   const harness = createHarness({

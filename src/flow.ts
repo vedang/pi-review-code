@@ -257,6 +257,11 @@ function normalizeFixContext(fixContext?: string): string | undefined {
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
+function withFixContext(fixContext?: string): { fixContext?: string } {
+  const normalized = normalizeFixContext(fixContext);
+  return normalized === undefined ? {} : { fixContext: normalized };
+}
+
 export function buildReviewBranchSummary(
   input: BuildReviewBranchSummaryInput,
 ): ReviewBranchSummary {
@@ -306,10 +311,11 @@ export function buildFixBranchSummary(
           return `- ${comment.priority} ${comment.id}${referenceText}: ${comment.comment}`;
         });
 
-  const fixContext = normalizeFixContext(input.fixContext);
+  const fixContextDetails = withFixContext(input.fixContext);
   const fixContextLine =
-    fixContext === undefined ? [] : ["", `Fix context: ${fixContext}`];
-  const fixContextDetails = fixContext === undefined ? {} : { fixContext };
+    fixContextDetails.fixContext === undefined
+      ? []
+      : ["", `Fix context: ${fixContextDetails.fixContext}`];
   const summaryLines = [
     `pi-review-code review-fix ${input.runId}`,
     `Source review: ${input.sourceReviewRunId}`,
@@ -622,21 +628,19 @@ function reviewFindingKey(reviewRunId: string, findingId: string): string {
   return `${reviewRunId}:${findingId}`;
 }
 
-export function buildReviewFixWidgetData(
-  entries: unknown[],
-): ReviewFixWidgetData {
+type ReviewFixEntryScan = {
+  reviews: ParsedReviewSummaryForFix[];
+  fixedFindingKeys: Set<string>;
+};
+
+function scanReviewFixEntries(entries: unknown[]): ReviewFixEntryScan {
+  const reviews: ParsedReviewSummaryForFix[] = [];
   const fixedFindingKeys = new Set<string>();
-  let latestReviewSummary: ParsedReviewSummaryForFix | undefined;
 
   for (let index = 0; index < entries.length; index += 1) {
     const review = parseReviewSummaryForFixEntry(entries[index], index);
     if (review !== undefined) {
-      if (review.comments.length > 0) {
-        latestReviewSummary =
-          latestReviewSummary === undefined
-            ? review
-            : chooseLatestReviewSummary(review, latestReviewSummary);
-      }
+      reviews.push(review);
       continue;
     }
 
@@ -649,6 +653,33 @@ export function buildReviewFixWidgetData(
       fixedFindingKeys.add(reviewFindingKey(fix.sourceReviewRunId, commentId));
     }
   }
+
+  return { reviews, fixedFindingKeys };
+}
+
+function findLatestReview(
+  reviews: ParsedReviewSummaryForFix[],
+): ParsedReviewSummaryForFix | undefined {
+  return reviews.reduce<ParsedReviewSummaryForFix | undefined>(
+    (latest, review) =>
+      latest === undefined ? review : chooseLatestReviewSummary(review, latest),
+    undefined,
+  );
+}
+
+function findLatestReviewWithFindings(
+  reviews: ParsedReviewSummaryForFix[],
+): ParsedReviewSummaryForFix | undefined {
+  return findLatestReview(
+    reviews.filter((review) => review.comments.length > 0),
+  );
+}
+
+export function buildReviewFixWidgetData(
+  entries: unknown[],
+): ReviewFixWidgetData {
+  const { reviews, fixedFindingKeys } = scanReviewFixEntries(entries);
+  const latestReviewSummary = findLatestReviewWithFindings(reviews);
 
   if (latestReviewSummary === undefined) {
     return {
@@ -1173,30 +1204,10 @@ export function createReviewFlowController(
     entries: unknown[],
     result: { reviewRunId: string; findingIds: string[] },
   ): ReviewSummaryForFix | undefined {
-    let selectedReview: ParsedReviewSummaryForFix | undefined;
-    const fixedFindingKeys = new Set<string>();
-
-    for (let index = 0; index < entries.length; index += 1) {
-      const review = parseReviewSummaryForFixEntry(entries[index], index);
-      if (review !== undefined && review.runId === result.reviewRunId) {
-        selectedReview =
-          selectedReview === undefined
-            ? review
-            : chooseLatestReviewSummary(selectedReview, review);
-        continue;
-      }
-
-      const fix = parseFixSummaryForFixEntry(entries[index], index);
-      if (fix === undefined) {
-        continue;
-      }
-
-      for (const commentId of fix.commentIds) {
-        fixedFindingKeys.add(
-          reviewFindingKey(fix.sourceReviewRunId, commentId),
-        );
-      }
-    }
+    const { reviews, fixedFindingKeys } = scanReviewFixEntries(entries);
+    const selectedReview = findLatestReview(
+      reviews.filter((review) => review.runId === result.reviewRunId),
+    );
 
     if (selectedReview === undefined || selectedReview.comments.length === 0) {
       return undefined;
@@ -1205,13 +1216,13 @@ export function createReviewFlowController(
     const commentById = new Map(
       selectedReview.comments.map((comment) => [comment.id, comment]),
     );
-    const selectedIds = new Set<string>();
+    const selectedIds = new Set(result.findingIds);
 
-    for (const findingId of result.findingIds) {
-      if (selectedIds.has(findingId)) {
-        continue;
-      }
+    if (selectedIds.size === 0) {
+      return undefined;
+    }
 
+    for (const findingId of selectedIds) {
       const comment = commentById.get(findingId);
       if (
         comment === undefined ||
@@ -1219,24 +1230,17 @@ export function createReviewFlowController(
       ) {
         return undefined;
       }
-
-      selectedIds.add(findingId);
     }
 
-    if (selectedIds.size === 0) {
-      return undefined;
-    }
-
-    const comments: ReviewComment[] = [];
     const emittedIds = new Set<string>();
-    for (const comment of selectedReview.comments) {
+    const comments = selectedReview.comments.filter((comment) => {
       if (!selectedIds.has(comment.id) || emittedIds.has(comment.id)) {
-        continue;
+        return false;
       }
 
-      comments.push(comment);
       emittedIds.add(comment.id);
-    }
+      return true;
+    });
 
     if (comments.length !== selectedIds.size) {
       return undefined;
@@ -1326,8 +1330,8 @@ export function createReviewFlowController(
       return;
     }
 
-    const fixContext = normalizeFixContext(selectedResult.fixContext);
-    const optionalFixContext = fixContext === undefined ? {} : { fixContext };
+    const optionalFixContext = withFixContext(selectedResult.fixContext);
+    const fixContext = optionalFixContext.fixContext;
 
     const fixPrompt = buildReviewFixPrompt({
       reviewRunId: revalidated.runId,
@@ -1408,7 +1412,6 @@ export function createReviewFlowController(
           completedAt: dependencies.getNow(),
         });
       } else {
-        const summaryFixContext = normalizeFixContext(run.fixContext);
         summary = buildFixBranchSummary({
           runId: run.runId,
           sourceReviewRunId: run.sourceReviewRunId,
@@ -1417,9 +1420,7 @@ export function createReviewFlowController(
           comments: run.selectedComments,
           agentSummary: extractAssistantSummary(event),
           completedAt: dependencies.getNow(),
-          ...(summaryFixContext === undefined
-            ? {}
-            : { fixContext: summaryFixContext }),
+          ...withFixContext(run.fixContext),
         });
       }
 
