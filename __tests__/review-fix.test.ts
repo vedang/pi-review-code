@@ -3,6 +3,11 @@ import test from "node:test";
 
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 
+import type {
+  ReviewFixWidgetConfig,
+  ReviewFixWidgetResult,
+} from "../src/review-fix-widget.js";
+
 import { REVIEW_FIX_USAGE } from "../src/command.js";
 import {
   REVIEW_FIX_SUMMARY_ENTRY_TYPE,
@@ -466,6 +471,10 @@ type HarnessOptions = {
   hasUI?: boolean;
   model?: { provider: string; id: string } | null;
   entries?: unknown[];
+  entriesSequence?: unknown[][];
+  leafId?: string | null;
+  fixWidgetResult?: ReviewFixWidgetResult;
+  showFixWidget?: false;
   navigateResults?: Array<{ cancelled: boolean } | Error>;
 };
 
@@ -486,11 +495,23 @@ function createHarness(options: HarnessOptions = {}) {
   const startedFixRuns: unknown[] = [];
   const clearedRuns: unknown[] = [];
   const waitForIdleCalls: number[] = [];
+  const fixWidgetConfigs: ReviewFixWidgetConfig[] = [];
   const navigateResults = [...(options.navigateResults ?? [])];
 
   const entries = options.entries ?? [
     reviewSummaryEntry("review-1", [comment({ runId: "review-1" })]),
   ];
+  const entriesSequence = options.entriesSequence;
+  let getEntriesCallCount = 0;
+  const getEntries = () => {
+    if (entriesSequence === undefined) {
+      return entries;
+    }
+
+    const index = Math.min(getEntriesCallCount, entriesSequence.length - 1);
+    getEntriesCallCount += 1;
+    return entriesSequence[index] ?? [];
+  };
 
   const controller = createReviewFlowController({
     pi: {
@@ -531,6 +552,23 @@ function createHarness(options: HarnessOptions = {}) {
     createRunId: () => "fix-1",
     getNow: () => 456,
     getThinkingLevel: () => "medium",
+    ...(options.showFixWidget === false
+      ? {}
+      : {
+          showFixWidget: async (
+            _ctx: ExtensionCommandContext,
+            config: ReviewFixWidgetConfig,
+          ) => {
+            fixWidgetConfigs.push(config);
+            return (
+              options.fixWidgetResult ?? {
+                submitted: true,
+                reviewRunId: "review-1",
+                findingIds: ["comment-1"],
+              }
+            );
+          },
+        }),
   });
 
   const ctx = {
@@ -540,8 +578,9 @@ function createHarness(options: HarnessOptions = {}) {
         ? undefined
         : (options.model ?? { provider: "anthropic", id: "claude-sonnet" }),
     sessionManager: {
-      getLeafId: () => "leaf-fix-origin",
-      getEntries: () => entries,
+      getLeafId: () =>
+        options.leafId === undefined ? "leaf-fix-origin" : options.leafId,
+      getEntries,
     },
     waitForIdle: async () => {
       waitForIdleCalls.push(1);
@@ -587,33 +626,65 @@ function createHarness(options: HarnessOptions = {}) {
     startedFixRuns,
     clearedRuns,
     waitForIdleCalls,
+    fixWidgetConfigs,
   };
 }
 
 function assertFixRunStarted(
   harness: ReturnType<typeof createHarness>,
   expectedCommentIds: string[],
+  options: {
+    sourceReviewRunId?: string;
+    targetHint?: string;
+    fixContext?: string;
+  } = {},
 ): void {
   assert.deepEqual(harness.startedFixRuns, [
     {
       runId: "fix-1",
       originLeafId: "leaf-fix-origin",
-      targetHint: "review auth boundaries",
+      targetHint: options.targetHint ?? "review auth boundaries",
       reviewPrompt: harness.sentUserMessages[0],
       originModelProvider: "anthropic",
       originModelId: "claude-sonnet",
       originThinkingLevel: "medium",
-      sourceReviewRunId: "review-1",
+      sourceReviewRunId: options.sourceReviewRunId ?? "review-1",
       commentIds: expectedCommentIds,
+      ...(options.fixContext === undefined
+        ? {}
+        : { fixContext: options.fixContext }),
     },
   ]);
 }
 
-test("review-fix without arguments shows help without launching", async () => {
-  const harness = createHarness();
+test("review-fix without arguments opens widget before model validation", async () => {
+  const harness = createHarness({
+    model: null,
+    fixWidgetResult: { submitted: false },
+  });
 
   await harness.controller.handleReviewFixCommand("", harness.ctx);
 
+  assert.equal(harness.fixWidgetConfigs.length, 1);
+  assert.equal(harness.fixWidgetConfigs[0]?.reviewRunId, "review-1");
+  assert.deepEqual(
+    harness.fixWidgetConfigs[0]?.findings.map((finding) => finding.id),
+    ["comment-1"],
+  );
+  assert.deepEqual(harness.waitForIdleCalls, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.startedFixRuns, []);
+  assert.deepEqual(harness.notifications, [
+    { message: "Review-fix cancelled.", level: "info" },
+  ]);
+});
+
+test("review-fix without widget dependency shows fix usage", async () => {
+  const harness = createHarness({ showFixWidget: false });
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.deepEqual(harness.fixWidgetConfigs, []);
   assert.deepEqual(harness.sentUserMessages, []);
   assert.deepEqual(harness.startedFixRuns, []);
   assert.deepEqual(harness.notifications, [
@@ -621,116 +692,71 @@ test("review-fix without arguments shows help without launching", async () => {
   ]);
 });
 
-test("review-fix list shows unfixed findings without model or branch launch", async () => {
-  const fixed = comment({
-    id: "finding-fixed",
-    runId: "review-1",
-    priority: "P1",
-    comment: "Already fixed race.",
-  });
-  const open = comment({
-    id: "finding-open",
-    runId: "review-1",
-    priority: "P2",
-    comment: "Logout leaves stale cache.",
-    references: [{ filePath: "src/cache.ts", startLine: 10 }],
-  });
-  const harness = createHarness({
-    model: null,
-    entries: [
-      reviewSummaryEntry("review-1", [fixed, open]),
-      fixSummaryEntry("fix-1", "review-1", [fixed]),
-    ],
-  });
-
-  await harness.controller.handleReviewFixCommand("list", harness.ctx);
-
-  assert.deepEqual(harness.waitForIdleCalls, []);
-  assert.deepEqual(harness.sentUserMessages, []);
-  assert.deepEqual(harness.startedFixRuns, []);
-  assert.equal(harness.notifications.length, 1);
-  assert.equal(harness.notifications[0]?.level, "info");
-
-  const message = harness.notifications[0]?.message ?? "";
-  assert.match(message, /Unfixed review findings/);
-  assert.match(message, /Review review-1/);
-  assert.match(message, /Target: review auth boundaries/);
-  assert.match(message, /P2 finding-open/);
-  assert.match(message, /src\/cache\.ts:10/);
-  assert.match(message, /Logout leaves stale cache\./);
-  assert.match(
-    message,
-    /Use \/review-fix finding <finding-id> \[<finding-id> \.\.\.\]/,
-  );
-  assert.doesNotMatch(message, /finding-fixed/);
-});
-
-test("review-fix list reports all-fixed and no-findings distinctly", async () => {
-  const fixed = comment({ id: "finding-fixed", runId: "review-1" });
-  const allFixedHarness = createHarness({
-    entries: [
-      reviewSummaryEntry("review-1", [fixed]),
-      fixSummaryEntry("fix-1", "review-1", [fixed]),
-    ],
-  });
-
-  await allFixedHarness.controller.handleReviewFixCommand(
-    "list",
-    allFixedHarness.ctx,
-  );
-
-  assert.deepEqual(allFixedHarness.notifications, [
-    { message: "All review findings have been fixed.", level: "info" },
-  ]);
-
-  const noFindingsHarness = createHarness({ entries: [] });
-
-  await noFindingsHarness.controller.handleReviewFixCommand(
-    "list",
-    noFindingsHarness.ctx,
-  );
-
-  assert.deepEqual(noFindingsHarness.notifications, [
-    { message: "No review findings found.", level: "info" },
-  ]);
-});
-
-test("review-fix launches fix branch for latest review comments", async () => {
+test("review-fix rejects nonblank arguments with widget guidance", async () => {
   const harness = createHarness();
 
   await harness.controller.handleReviewFixCommand("latest", harness.ctx);
 
-  assert.equal(harness.sentUserMessages.length, 1);
-  assert.match(harness.sentUserMessages[0] ?? "", /comment-1/);
-  assertFixRunStarted(harness, ["comment-1"]);
+  assert.deepEqual(harness.fixWidgetConfigs, []);
+  assert.deepEqual(harness.waitForIdleCalls, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.startedFixRuns, []);
   assert.deepEqual(harness.notifications, [
-    { message: "Fix branch started: fix-1", level: "info" },
+    {
+      message: "Run /review-fix and select findings in the widget.",
+      level: "info",
+    },
   ]);
 });
 
-test("review-fix launches fix branch for one finding id", async () => {
+test("review-fix opens empty widget when no completed review findings exist", async () => {
+  const harness = createHarness({
+    entries: [],
+    fixWidgetResult: { submitted: false },
+  });
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.equal(harness.fixWidgetConfigs.length, 1);
+  assert.equal(harness.fixWidgetConfigs[0]?.reviewRunId, undefined);
+  assert.deepEqual(harness.fixWidgetConfigs[0]?.findings, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.startedFixRuns, []);
+  assert.deepEqual(harness.notifications, [
+    { message: "Review-fix cancelled.", level: "info" },
+  ]);
+});
+
+test("review-fix widget displays latest completed review", async () => {
   const harness = createHarness({
     entries: [
       reviewSummaryEntry("review-1", [
-        comment({ id: "finding-one", runId: "review-1" }),
-        comment({
-          id: "finding-two",
-          runId: "review-1",
-          comment: "Logout leaves stale cache.",
-        }),
+        comment({ id: "old", runId: "review-1" }),
       ]),
+      reviewSummaryEntry(
+        "review-2",
+        [comment({ id: "new", runId: "review-2" })],
+        { completedAt: 200, targetHint: "review cache boundaries" },
+      ),
     ],
+    fixWidgetResult: { submitted: false },
   });
 
-  await harness.controller.handleReviewFixCommand("finding-two", harness.ctx);
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
 
-  assert.equal(harness.sentUserMessages.length, 1);
-  assert.doesNotMatch(harness.sentUserMessages[0] ?? "", /finding-one/);
-  assert.match(harness.sentUserMessages[0] ?? "", /finding-two/);
-  assertFixRunStarted(harness, ["finding-two"]);
+  assert.equal(harness.fixWidgetConfigs.length, 1);
+  assert.equal(harness.fixWidgetConfigs[0]?.reviewRunId, "review-2");
+  assert.equal(
+    harness.fixWidgetConfigs[0]?.targetHint,
+    "review cache boundaries",
+  );
+  assert.deepEqual(
+    harness.fixWidgetConfigs[0]?.findings.map((finding) => finding.id),
+    ["new"],
+  );
 });
 
-test("review-fix launches fix branch for multiple finding ids", async () => {
+test("review-fix widget submit launches fix branch for selected findings", async () => {
   const harness = createHarness({
     entries: [
       reviewSummaryEntry("review-1", [
@@ -747,18 +773,23 @@ test("review-fix launches fix branch for multiple finding ids", async () => {
         }),
       ]),
     ],
+    fixWidgetResult: {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["finding-one", "finding-two"],
+    },
   });
 
-  await harness.controller.handleReviewFixCommand(
-    "finding finding-one finding-two",
-    harness.ctx,
-  );
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
 
   assert.equal(harness.sentUserMessages.length, 1);
   assert.match(harness.sentUserMessages[0] ?? "", /finding-one/);
   assert.match(harness.sentUserMessages[0] ?? "", /finding-two/);
   assert.doesNotMatch(harness.sentUserMessages[0] ?? "", /finding-three/);
   assertFixRunStarted(harness, ["finding-one", "finding-two"]);
+  assert.deepEqual(harness.notifications, [
+    { message: "Fix branch started: fix-1", level: "info" },
+  ]);
   assert.equal(harness.sentMessages.length, 1);
   assert.deepEqual(harness.sentMessages[0]?.details, {
     kind: "prompt",
@@ -774,26 +805,193 @@ test("review-fix launches fix branch for multiple finding ids", async () => {
   });
 });
 
-test("review-fix reports missing review summary without launching", async () => {
-  const harness = createHarness({ entries: [] });
+test("review-fix widget submit checks active model after selection", async () => {
+  const harness = createHarness({
+    model: null,
+    fixWidgetResult: {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["comment-1"],
+    },
+  });
 
-  await harness.controller.handleReviewFixCommand("latest", harness.ctx);
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.equal(harness.fixWidgetConfigs.length, 1);
+  assert.deepEqual(harness.waitForIdleCalls, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.startedFixRuns, []);
+  assert.deepEqual(harness.notifications, [
+    {
+      message: "Cannot start review-fix: no active model is selected.",
+      level: "error",
+    },
+  ]);
+});
+
+test("review-fix widget submit checks current leaf after selection", async () => {
+  const harness = createHarness({
+    leafId: null,
+    fixWidgetResult: {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["comment-1"],
+    },
+  });
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.deepEqual(harness.waitForIdleCalls, [1]);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.startedFixRuns, []);
+  assert.deepEqual(harness.notifications, [
+    {
+      message: "Cannot start review-fix: no current branch leaf id.",
+      level: "error",
+    },
+  ]);
+});
+
+test("review-fix widget result revalidates submitted review run", async () => {
+  const oldFinding = comment({ id: "old", runId: "review-1" });
+  const newFinding = comment({ id: "new", runId: "review-2" });
+  const harness = createHarness({
+    entriesSequence: [
+      [reviewSummaryEntry("review-1", [oldFinding], { completedAt: 100 })],
+      [
+        reviewSummaryEntry("review-1", [oldFinding], { completedAt: 100 }),
+        reviewSummaryEntry("review-2", [newFinding], { completedAt: 200 }),
+      ],
+    ],
+    fixWidgetResult: {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["old"],
+    },
+  });
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.equal(harness.sentUserMessages.length, 1);
+  assert.match(harness.sentUserMessages[0] ?? "", /old/);
+  assert.doesNotMatch(harness.sentUserMessages[0] ?? "", /new/);
+  assertFixRunStarted(harness, ["old"]);
+});
+
+test("review-fix rejects stale widget finding after submit", async () => {
+  const harness = createHarness({
+    entriesSequence: [
+      [
+        reviewSummaryEntry("review-1", [
+          comment({ id: "finding-one", runId: "review-1" }),
+        ]),
+      ],
+      [
+        reviewSummaryEntry("review-1", [
+          comment({ id: "finding-two", runId: "review-1" }),
+        ]),
+      ],
+    ],
+    fixWidgetResult: {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["finding-one"],
+    },
+  });
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
 
   assert.deepEqual(harness.sentUserMessages, []);
   assert.deepEqual(harness.startedFixRuns, []);
   assert.deepEqual(harness.notifications, [
     {
       message:
-        "Cannot start review-fix: no completed review with comments found.",
+        "Cannot start review-fix: selected findings are no longer available.",
       level: "error",
     },
   ]);
 });
 
+test("review-fix rejects already-fixed widget finding after submit", async () => {
+  const finding = comment({ id: "finding-one", runId: "review-1" });
+  const harness = createHarness({
+    entriesSequence: [
+      [reviewSummaryEntry("review-1", [finding])],
+      [
+        reviewSummaryEntry("review-1", [finding]),
+        fixSummaryEntry("fix-1", "review-1", [finding]),
+      ],
+    ],
+    fixWidgetResult: {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["finding-one"],
+    },
+  });
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.startedFixRuns, []);
+  assert.deepEqual(harness.notifications, [
+    {
+      message:
+        "Cannot start review-fix: selected findings are no longer available.",
+      level: "error",
+    },
+  ]);
+});
+
+test("review-fix propagates widget context through run metadata and summary", async () => {
+  const harness = createHarness({
+    fixWidgetResult: {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["comment-1"],
+      fixContext: "Prioritize logout races.",
+    },
+  });
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.match(
+    harness.sentUserMessages[0] ?? "",
+    /Additional human context for this fix loop:/,
+  );
+  assert.match(harness.sentUserMessages[0] ?? "", /Prioritize logout races\./);
+  assertFixRunStarted(harness, ["comment-1"], {
+    fixContext: "Prioritize logout races.",
+  });
+  assert.deepEqual(harness.sentMessages[0]?.details, {
+    kind: "prompt",
+    mode: "fix",
+    runId: "fix-1",
+    targetHint: "review auth boundaries",
+    reviewPrompt: harness.sentUserMessages[0],
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1"],
+    fixContext: "Prioritize logout races.",
+  });
+
+  await harness.controller.handleAgentEnd(harness.createFixAgentEndEvent(), {
+    sessionManager: harness.ctx.sessionManager,
+  } as never);
+
+  assert.equal(harness.sentMessages.length, 2);
+  assert.deepEqual(
+    (harness.sentMessages[1]?.details as { fixContext?: string } | undefined)
+      ?.fixContext,
+    "Prioritize logout races.",
+  );
+});
+
 test("review-fix emits custom prompt and summary messages for renderers", async () => {
   const harness = createHarness();
 
-  await harness.controller.handleReviewFixCommand("latest", harness.ctx);
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
 
   assert.equal(harness.sentMessages.length, 1);
   assert.equal(harness.sentMessages[0]?.customType, REVIEW_PROMPT_ENTRY_TYPE);
@@ -828,7 +1026,7 @@ test("review-fix emits custom prompt and summary messages for renderers", async 
 test("review-fix collapses active fix branch with custom summary", async () => {
   const harness = createHarness();
 
-  await harness.controller.handleReviewFixCommand("latest", harness.ctx);
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
   await harness.controller.handleAgentEnd(harness.createFixAgentEndEvent(), {
     sessionManager: harness.ctx.sessionManager,
   } as never);
@@ -848,7 +1046,7 @@ test("review-fix collapses active fix branch with custom summary", async () => {
 test("session_before_tree returns pending review-fix summary", async () => {
   const harness = createHarness();
 
-  await harness.controller.handleReviewFixCommand("latest", harness.ctx);
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
   await harness.controller.handleAgentEnd(harness.createFixAgentEndEvent(), {
     sessionManager: harness.ctx.sessionManager,
   } as never);
@@ -872,7 +1070,7 @@ test("session_before_tree returns pending review-fix summary", async () => {
 test("session_before_tree ignores review-fix summary for mismatched target", async () => {
   const harness = createHarness();
 
-  await harness.controller.handleReviewFixCommand("latest", harness.ctx);
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
   await harness.controller.handleAgentEnd(harness.createFixAgentEndEvent(), {
     sessionManager: harness.ctx.sessionManager,
   } as never);

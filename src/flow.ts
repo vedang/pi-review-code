@@ -14,7 +14,6 @@ import {
   buildReviewPrCommandFromInput,
   parseReviewArgs,
   parseReviewDiffAgainstArgs,
-  parseReviewFixArgs,
   parseReviewPrArgs,
 } from "./command.js";
 import type {
@@ -26,6 +25,10 @@ import type {
   ReviewPromptDraftOptions,
   ReviewPromptDraftRequest,
 } from "./prompts.js";
+import type {
+  ReviewFixWidgetConfig,
+  ReviewFixWidgetResult,
+} from "./review-fix-widget.js";
 import {
   type AddReviewCommentReference,
   REVIEW_COMMENT_PRIORITIES,
@@ -76,6 +79,7 @@ export type ReviewPromptMessageDetails = {
   originThinkingLevel: string;
   sourceReviewRunId?: string;
   commentIds?: string[];
+  fixContext?: string;
 };
 
 export type BuildFixBranchSummaryInput = {
@@ -86,6 +90,7 @@ export type BuildFixBranchSummaryInput = {
   comments: ReviewComment[];
   agentSummary: string;
   completedAt: number;
+  fixContext?: string;
 };
 
 export type FixBranchSummaryDetails = {
@@ -97,6 +102,7 @@ export type FixBranchSummaryDetails = {
   completedAt: number;
   comments: ReviewComment[];
   agentSummary: string;
+  fixContext?: string;
 };
 
 export type FixBranchSummary = {
@@ -175,6 +181,11 @@ type ShowInputWidget = (
   config: ReviewInputWidgetConfig,
 ) => Promise<ReviewInputWidgetResult>;
 
+type ShowFixWidget = (
+  ctx: ExtensionCommandContext,
+  config: ReviewFixWidgetConfig,
+) => Promise<ReviewFixWidgetResult>;
+
 const REVIEW_WIDGET_HELP_TEXT = "Usage:\n  /review <review request>";
 const REVIEW_WIDGET_PRIMARY_LABEL = "what do I review?";
 const REVIEW_WIDGET_PRIMARY_PLACEHOLDER =
@@ -189,6 +200,7 @@ const REVIEW_PR_WIDGET_PRIMARY_PLACEHOLDER =
   "Enter GitHub URL, GitLab URL, or PR number.";
 
 const REVIEW_WIDGET_CANCELLED_MESSAGE = "Review cancelled.";
+const REVIEW_FIX_WIDGET_CANCELLED_MESSAGE = "Review-fix cancelled.";
 const REVIEW_NO_ACTIVE_MODEL_ERROR =
   "Cannot start review: no active model is selected.";
 
@@ -196,6 +208,14 @@ const REVIEW_WIDGET_INVALID_ARGS_ERROR =
   "Cannot start review: invalid command arguments.";
 
 const REVIEW_WIDGET_BASE_TITLE = "Start review";
+
+const REVIEW_FIX_WIDGET_TITLE = "Start review fix";
+const REVIEW_FIX_WIDGET_HELP_TEXT =
+  "Select one or more findings from the latest completed review and start a focused fix run.";
+const REVIEW_FIX_BARE_HELP_MESSAGE =
+  "Run /review-fix and select findings in the widget.";
+const REVIEW_FIX_REVALIDATE_ERROR =
+  "Cannot start review-fix: selected findings are no longer available.";
 
 const REVIEW_DIFF_AGAINST_WIDGET = {
   kind: "diff-against" as const,
@@ -238,6 +258,11 @@ function formatReference(reference: {
   }
 
   return `${reference.filePath}:${reference.startLine}`;
+}
+
+function normalizeFixContext(fixContext?: string): string | undefined {
+  const trimmed = fixContext?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
 export function buildReviewBranchSummary(
@@ -289,17 +314,24 @@ export function buildFixBranchSummary(
           return `- ${comment.priority} ${comment.id}${referenceText}: ${comment.comment}`;
         });
 
+  const fixContext = normalizeFixContext(input.fixContext);
+  const fixContextLine =
+    fixContext === undefined ? [] : ["", `Fix context: ${fixContext}`];
+  const fixContextDetails = fixContext === undefined ? {} : { fixContext };
+  const summaryLines = [
+    `pi-review-code review-fix ${input.runId}`,
+    `Source review: ${input.sourceReviewRunId}`,
+    `Target: ${input.targetHint}`,
+    `Prompt: ${input.fixPrompt}`,
+    ...fixContextLine,
+    "",
+    ...findingLines,
+    "",
+    `Agent summary: ${input.agentSummary}`,
+  ];
+
   return {
-    summary: [
-      `pi-review-code review-fix ${input.runId}`,
-      `Source review: ${input.sourceReviewRunId}`,
-      `Target: ${input.targetHint}`,
-      `Prompt: ${input.fixPrompt}`,
-      "",
-      ...findingLines,
-      "",
-      `Agent summary: ${input.agentSummary}`,
-    ].join("\n"),
+    summary: summaryLines.join("\n"),
     details: {
       kind: "fix",
       runId: input.runId,
@@ -309,6 +341,7 @@ export function buildFixBranchSummary(
       completedAt: input.completedAt,
       comments: input.comments,
       agentSummary: input.agentSummary,
+      ...fixContextDetails,
     },
   };
 }
@@ -938,6 +971,7 @@ type ReviewFlowDependencies = {
   createRunId: () => string;
   getNow: () => number;
   showInputWidget?: ShowInputWidget;
+  showFixWidget?: ShowFixWidget;
 };
 
 type ReviewRunInfo = {
@@ -1368,6 +1402,88 @@ export function createReviewFlowController(
     });
   }
 
+  function buildSelectedReviewSummaryForWidgetResult(
+    entries: unknown[],
+    result: { reviewRunId: string; findingIds: string[] },
+  ): ReviewSummaryForFix | undefined {
+    let selectedReview: ParsedReviewSummaryForFix | undefined;
+    const fixedFindingKeys = new Set<string>();
+
+    for (let index = 0; index < entries.length; index += 1) {
+      const review = parseReviewSummaryForFixEntry(entries[index], index);
+      if (review !== undefined && review.runId === result.reviewRunId) {
+        selectedReview =
+          selectedReview === undefined
+            ? review
+            : chooseLatestReviewSummary(selectedReview, review);
+        continue;
+      }
+
+      const fix = parseFixSummaryForFixEntry(entries[index], index);
+      if (fix === undefined) {
+        continue;
+      }
+
+      for (const commentId of fix.commentIds) {
+        fixedFindingKeys.add(
+          reviewFindingKey(fix.sourceReviewRunId, commentId),
+        );
+      }
+    }
+
+    if (selectedReview === undefined || selectedReview.comments.length === 0) {
+      return undefined;
+    }
+
+    const commentById = new Map(
+      selectedReview.comments.map((comment) => [comment.id, comment]),
+    );
+    const selectedIds = new Set<string>();
+
+    for (const findingId of result.findingIds) {
+      if (selectedIds.has(findingId)) {
+        continue;
+      }
+
+      const comment = commentById.get(findingId);
+      if (
+        comment === undefined ||
+        fixedFindingKeys.has(reviewFindingKey(result.reviewRunId, findingId))
+      ) {
+        return undefined;
+      }
+
+      selectedIds.add(findingId);
+    }
+
+    if (selectedIds.size === 0) {
+      return undefined;
+    }
+
+    const comments: ReviewComment[] = [];
+    const emittedIds = new Set<string>();
+    for (const comment of selectedReview.comments) {
+      if (!selectedIds.has(comment.id) || emittedIds.has(comment.id)) {
+        continue;
+      }
+
+      comments.push(comment);
+      emittedIds.add(comment.id);
+    }
+
+    if (comments.length !== selectedIds.size) {
+      return undefined;
+    }
+
+    return {
+      runId: selectedReview.runId,
+      targetHint: selectedReview.targetHint,
+      reviewPrompt: selectedReview.reviewPrompt,
+      completedAt: selectedReview.completedAt,
+      comments,
+    };
+  }
+
   async function handleReviewFixCommand(
     args: string,
     ctx: ExtensionCommandContext,
@@ -1376,27 +1492,50 @@ export function createReviewFlowController(
       return;
     }
 
-    let command: ReturnType<typeof parseReviewFixArgs>;
-    try {
-      command = parseReviewFixArgs(args);
-    } catch (error) {
-      ctx.ui.notify(
-        error instanceof Error ? error.message : "Cannot start review-fix.",
-        "error",
-      );
+    if (args.trim().length > 0) {
+      ctx.ui.notify(REVIEW_FIX_BARE_HELP_MESSAGE, "info");
       return;
     }
 
-    if (command.selector.kind === "help") {
+    if (dependencies.showFixWidget === undefined) {
       ctx.ui.notify(REVIEW_FIX_USAGE, "info");
       return;
     }
 
-    if (command.selector.kind === "list") {
-      const listResult = listUnfixedReviewFindings(
-        ctx.sessionManager.getEntries(),
-      );
-      ctx.ui.notify(formatUnfixedReviewFindingsText(listResult), "info");
+    const widgetData = buildReviewFixWidgetData(
+      ctx.sessionManager.getEntries(),
+    );
+    const selectedResult = await dependencies.showFixWidget(ctx, {
+      title: REVIEW_FIX_WIDGET_TITLE,
+      helpText: REVIEW_FIX_WIDGET_HELP_TEXT,
+      ...(widgetData.ok
+        ? {
+            reviewRunId: widgetData.reviewRunId,
+            targetHint: widgetData.targetHint,
+            completedAt: widgetData.completedAt,
+          }
+        : {}),
+      findings: widgetData.findings.map((finding) => ({
+        id: finding.comment.id,
+        priority: finding.comment.priority,
+        comment: finding.comment.comment,
+        references: finding.comment.references,
+        fixed: finding.fixed,
+      })),
+    });
+
+    if (selectedResult.submitted === false) {
+      ctx.ui.notify(REVIEW_FIX_WIDGET_CANCELLED_MESSAGE, "info");
+      return;
+    }
+
+    const revalidated = buildSelectedReviewSummaryForWidgetResult(
+      ctx.sessionManager.getEntries(),
+      selectedResult,
+    );
+
+    if (revalidated === undefined) {
+      ctx.ui.notify(REVIEW_FIX_REVALIDATE_ERROR, "error");
       return;
     }
 
@@ -1420,36 +1559,28 @@ export function createReviewFlowController(
       return;
     }
 
-    const selectedSummary = selectReviewSummaryForFix(
-      ctx.sessionManager.getEntries(),
-      command.selector,
-    );
-
-    if (selectedSummary === undefined) {
-      ctx.ui.notify(
-        "Cannot start review-fix: no completed review with comments found.",
-        "error",
-      );
-      return;
-    }
+    const fixContext = normalizeFixContext(selectedResult.fixContext);
+    const optionalFixContext = fixContext === undefined ? {} : { fixContext };
 
     const fixPrompt = buildReviewFixPrompt({
-      reviewRunId: selectedSummary.runId,
-      targetHint: selectedSummary.targetHint,
-      comments: selectedSummary.comments,
+      reviewRunId: revalidated.runId,
+      targetHint: revalidated.targetHint,
+      comments: revalidated.comments,
+      fixContext,
     });
 
     const thinkingLevel = dependencies.getThinkingLevel();
     const fixRunInfo: ReviewFixRunInfo = {
       runId: dependencies.createRunId(),
       originLeafId,
-      targetHint: selectedSummary.targetHint,
+      targetHint: revalidated.targetHint,
       reviewPrompt: fixPrompt,
       originModelProvider: model.provider,
       originModelId: model.id,
       originThinkingLevel: thinkingLevel,
-      sourceReviewRunId: selectedSummary.runId,
-      commentIds: selectedSummary.comments.map((comment) => comment.id),
+      sourceReviewRunId: revalidated.runId,
+      commentIds: revalidated.comments.map((comment) => comment.id),
+      ...optionalFixContext,
     };
 
     await startFixRunIfSupported(ctx, fixRunInfo);
@@ -1458,7 +1589,7 @@ export function createReviewFlowController(
       ...fixRunInfo,
       kind: "fix",
       commandCtx: ctx,
-      selectedComments: selectedSummary.comments,
+      selectedComments: revalidated.comments,
     };
     sendPromptMessage(dependencies.pi, {
       kind: "prompt",
@@ -1471,8 +1602,8 @@ export function createReviewFlowController(
       originThinkingLevel: fixRunInfo.originThinkingLevel,
       sourceReviewRunId: fixRunInfo.sourceReviewRunId,
       commentIds: fixRunInfo.commentIds,
+      ...optionalFixContext,
     });
-
     ctx.ui.notify(`Fix branch started: ${fixRunInfo.runId}`, "info");
     dependencies.pi.sendUserMessage(fixPrompt);
   }
@@ -1510,6 +1641,7 @@ export function createReviewFlowController(
           completedAt: dependencies.getNow(),
         });
       } else {
+        const summaryFixContext = normalizeFixContext(run.fixContext);
         summary = buildFixBranchSummary({
           runId: run.runId,
           sourceReviewRunId: run.sourceReviewRunId,
@@ -1518,6 +1650,9 @@ export function createReviewFlowController(
           comments: run.selectedComments,
           agentSummary: extractAssistantSummary(event),
           completedAt: dependencies.getNow(),
+          ...(summaryFixContext === undefined
+            ? {}
+            : { fixContext: summaryFixContext }),
         });
       }
 

@@ -188,12 +188,35 @@ for (const [commandName, expectedHelp] of scaffoldHelpCases) {
   });
 }
 
-test("/review-fix shows help with empty args before runtime validation", async () => {
+test("/review-fix opens runtime fix widget with empty args", async () => {
   const harness = createRuntimeHarness();
 
   await runCommand(harness, "review-fix");
 
-  assertSingleNotification(harness, REVIEW_FIX_HELP_TEXT);
+  assert.equal(harness.customWidgetCalls.length, 1);
+  assert.deepEqual(harness.customWidgetCalls[0]?.options, {
+    overlay: true,
+    overlayOptions: {
+      width: "80%",
+      minWidth: 48,
+      maxHeight: "85%",
+      anchor: "center",
+      margin: 2,
+    },
+  });
+  assertSingleNotification(harness, "Review-fix cancelled.");
+});
+
+test("/review-fix rejects runtime selector args", async () => {
+  const harness = createRuntimeHarness();
+
+  await runCommand(harness, "review-fix", "latest");
+
+  assert.deepEqual(harness.customWidgetCalls, []);
+  assertSingleNotification(
+    harness,
+    "Run /review-fix and select findings in the widget.",
+  );
 });
 
 for (const commandName of [

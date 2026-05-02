@@ -15,6 +15,7 @@ import {
 import { createReviewFlowController } from "./flow.js";
 import { buildReviewPromptDraftRequest } from "./prompts.js";
 import { registerReviewMessageRenderers } from "./renderers.js";
+import { showReviewFixWidget } from "./review-fix-widget.js";
 import { showReviewInputWidget } from "./review-input-widget.js";
 import {
   type ReviewStateManager,
@@ -27,7 +28,7 @@ export const REVIEW_HELP_TEXT = [
   "pi-review-code review flow is installed.",
   "Usage:",
   "- /review <review request>",
-  "- /review-fix [list|latest|<review-run-id>|<finding-id>]",
+  "- /review-fix",
   "- /review-diff-against <ref>",
   "- /review-pr <github-url|gitlab-url|github-number>",
 ].join("\n");
@@ -36,12 +37,6 @@ export const REVIEW_FIX_HELP_TEXT = [
   "pi-review-code fix flow is installed.",
   "Usage:",
   "- /review-fix",
-  "- /review-fix latest",
-  "- /review-fix list",
-  "- /review-fix run <review-run-id>",
-  "- /review-fix finding <finding-id> [<finding-id> ...]",
-  "- /review-fix <review-run-id>",
-  "- /review-fix <finding-id>",
 ].join("\n");
 
 type ReviewRuntimeMethods = Pick<
@@ -121,7 +116,6 @@ const REVIEW_COMMANDS = {
     name: "review-fix",
     description: "Fix findings from a recent pi-review-code run",
     helpText: REVIEW_FIX_HELP_TEXT,
-    hasEmptyArgsHelp: true,
   },
   review: {
     name: "review",
@@ -195,6 +189,7 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
     getNow: () => Date.now(),
     getThinkingLevel: () => pi.getThinkingLevel() as PiReviewThinkingLevel,
     showInputWidget: showReviewInputWidget,
+    showFixWidget: showReviewFixWidget,
   });
 
   pi.on("session_start", (_event, ctx) => {
