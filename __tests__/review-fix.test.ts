@@ -135,6 +135,51 @@ test("selectReviewSummaryForFix can select one finding by id", () => {
   assertSelectedSummary(selected, "review-1", ["finding-two"]);
 });
 
+test("selectReviewSummaryForFix can select multiple findings in requested order", () => {
+  const selected = selectReviewSummaryForFix(
+    [
+      reviewSummaryEntry("review-1", [
+        comment({ id: "finding-a", runId: "review-1" }),
+        comment({ id: "finding-b", runId: "review-1" }),
+        comment({ id: "finding-c", runId: "review-1" }),
+      ]),
+    ],
+    { kind: "finding-ids", findingIds: ["finding-c", "finding-a"] },
+  );
+
+  assertSelectedSummary(selected, "review-1", ["finding-c", "finding-a"]);
+});
+
+test("selectReviewSummaryForFix rejects multiple findings when one id is missing", () => {
+  const selected = selectReviewSummaryForFix(
+    [
+      reviewSummaryEntry("review-1", [
+        comment({ id: "finding-a", runId: "review-1" }),
+        comment({ id: "finding-c", runId: "review-1" }),
+      ]),
+    ],
+    { kind: "finding-ids", findingIds: ["finding-c", "finding-b"] },
+  );
+
+  assert.equal(selected, undefined);
+});
+
+test("selectReviewSummaryForFix rejects multiple findings split across reviews", () => {
+  const selected = selectReviewSummaryForFix(
+    [
+      reviewSummaryEntry("review-1", [
+        comment({ id: "finding-a", runId: "review-1" }),
+      ]),
+      reviewSummaryEntry("review-2", [
+        comment({ id: "finding-b", runId: "review-2" }),
+      ]),
+    ],
+    { kind: "finding-ids", findingIds: ["finding-a", "finding-b"] },
+  );
+
+  assert.equal(selected, undefined);
+});
+
 test("selectReviewSummaryForFix treats ambiguous id as finding before run", () => {
   const selected = selectReviewSummaryForFix(
     [

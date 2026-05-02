@@ -609,8 +609,26 @@ export function selectReviewSummaryForFix(
       }
 
       case "list":
-      case "finding-ids":
         break;
+
+      case "finding-ids": {
+        const findingComments: ReviewComment[] = [];
+        let hasAllFindings = selector.findingIds.length > 0;
+
+        for (const findingId of selector.findingIds) {
+          const finding = firstCommentForFindingId(parsed, findingId);
+          if (finding === undefined) {
+            hasAllFindings = false;
+            break;
+          }
+          findingComments.push(finding);
+        }
+
+        if (hasAllFindings) {
+          candidates.push({ ...parsed, comments: findingComments });
+        }
+        break;
+      }
 
       default: {
         const finding = firstCommentForFindingId(parsed, selector.id);
