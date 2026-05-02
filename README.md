@@ -20,16 +20,16 @@ pi install -l git:github.com/vedang/pi-review-code
 
 ## Commands
 
-### `/review <review request>`
+### `/review [review request]`
 
-Review a free-form aspect of the codebase:
+Open a review input form for a free-form aspect of the codebase:
 
 ```text
-/review   # show help
+/review
 /review review the database schema and ensure column names are sensible
 ```
 
-The prompt draft turns the request into concrete inspection guidance.
+The form asks what to review and accepts optional context. Typed arguments prefill the required field so you can submit quickly or add context before prompt drafting.
 
 ### `/review-fix [list|latest|<review-run-id>|<finding-id>]`
 
@@ -47,38 +47,41 @@ Start a same-session fix branch for review comments, or omit arguments for usage
 
 The fix prompt lists selected comments with priorities and references. The fix branch collapses back with a summary of attempted fixes.
 
-### `/review-diff-against <ref>`
+### `/review-diff-against [ref]`
 
-Review the current local diff against a git ref:
+Open a review input form for the current local diff against a git ref:
 
 ```text
+/review-diff-against
 /review-diff-against origin/main
 ```
 
-The prompt draft includes changed files, diff stats, and safe command hints such as `git --no-pager diff <ref>`.
+The form asks for `ref:` and accepts optional context. Typed refs prefill the required field. The prompt draft includes changed files, diff stats, and safe command hints such as `git --no-pager diff <ref>`.
 
-### `/review-pr <github-url|gitlab-url|github-number>`
+### `/review-pr [github-url|gitlab-url|github-number]`
 
-Review a GitHub PR or GitLab MR through `gh`/`glab` metadata and diff commands:
+Open a review input form for a GitHub PR or GitLab MR through `gh`/`glab` metadata and diff commands:
 
 ```text
+/review-pr
 /review-pr https://github.com/owner/repo/pull/123
 /review-pr https://gitlab.com/group/project/-/merge_requests/123
 /review-pr 123
 ```
 
-Number-only selectors currently resolve GitHub PRs for the current repository. MVP behavior does not checkout or switch VCS branches.
+The form asks for `pr:` and accepts optional context. Typed selectors prefill the required field. Number-only selectors currently resolve GitHub PRs for the current repository. MVP behavior does not checkout or switch VCS branches.
 
 ## Review lifecycle
 
-1. Run `/review ...` in interactive Pi.
-2. Extension resolves target metadata.
-3. Current provider/model/thinking level generates a draft prompt.
-4. You edit or cancel the prompt.
-5. On submit, Pi starts a review branch with `add_review_comment` enabled.
-6. Review agent records actionable findings with `add_review_comment`.
-7. On agent completion, branch collapses back with a custom summary.
-8. `/review-fix` can use the persisted summary to launch a fix branch.
+1. Run `/review`, `/review-diff-against`, or `/review-pr` in interactive Pi.
+2. Fill the input widget: required target plus optional review context.
+3. Extension resolves target metadata.
+4. Current provider/model/thinking level generates a draft prompt.
+5. You edit or cancel the prompt.
+6. On submit, Pi starts a review branch with `add_review_comment` enabled.
+7. Review agent records actionable findings with `add_review_comment`.
+8. On agent completion, branch collapses back with a custom summary.
+9. `/review-fix` can use the persisted summary to launch a fix branch.
 
 ## UI
 
