@@ -57,6 +57,13 @@ function buildReviewContextBlock(reviewContext?: string): string[] {
     : ["", "Human-provided review context:", trimmed];
 }
 
+function buildFixContextBlock(fixContext?: string): string[] {
+  const trimmed = fixContext?.trim() ?? "";
+  return trimmed.length === 0
+    ? []
+    : ["", "Additional human context for this fix loop:", trimmed];
+}
+
 function buildReviewRubric(): string {
   const priorities = REVIEW_PRIORITIES.join("/");
 
@@ -167,6 +174,7 @@ export function buildReviewFixPrompt(input: {
   reviewRunId: string;
   targetHint: string;
   comments: ReviewComment[];
+  fixContext?: string;
 }): string {
   const findingLines =
     input.comments.length === 0
@@ -183,6 +191,7 @@ export function buildReviewFixPrompt(input: {
   return [
     `Fix findings from pi-review-code review ${input.reviewRunId}`,
     `Target: ${input.targetHint}`,
+    ...buildFixContextBlock(input.fixContext),
     "",
     "Work through comments in order:",
     ...findingLines,

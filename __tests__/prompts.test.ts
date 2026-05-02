@@ -1,8 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildReviewPromptDraftRequest } from "../src/prompts.js";
-import type { ResolvedReviewTarget } from "../src/types.js";
+import {
+  buildReviewFixPrompt,
+  buildReviewPromptDraftRequest,
+} from "../src/prompts.js";
+import {
+  REVIEW_STATE_VERSION,
+  type ResolvedReviewTarget,
+  type ReviewComment,
+} from "../src/types.js";
+
+function reviewComment(
+  id: string,
+  priority: ReviewComment["priority"],
+  comment: string,
+): ReviewComment {
+  return {
+    version: REVIEW_STATE_VERSION,
+    id,
+    runId: "review-run-1",
+    priority,
+    comment,
+    references: [{ filePath: "src/auth.ts", startLine: 10, endLine: 12 }],
+    createdAt: 1000,
+    targetHint: "origin/main",
+  };
+}
 
 function diffTarget(): ResolvedReviewTarget {
   return {
@@ -30,6 +54,40 @@ function diffTarget(): ResolvedReviewTarget {
     ],
   };
 }
+
+test("buildReviewFixPrompt includes additional context before ordered findings", () => {
+  const prompt = buildReviewFixPrompt({
+    reviewRunId: "review-run-1",
+    targetHint: "origin/main",
+    fixContext:
+      "Prioritize safe rollback over broad refactors.\nKeep auth API stable.",
+    comments: [
+      reviewComment("finding-b", "P1", "Refresh token expires too early."),
+      reviewComment("finding-a", "P2", "Retry loop hides failures."),
+    ],
+  });
+
+  assert.match(
+    prompt,
+    /Target: origin\/main\n\nAdditional human context for this fix loop:\nPrioritize safe rollback over broad refactors\.\nKeep auth API stable\.\n\nWork through comments in order:/,
+  );
+  assert.match(
+    prompt,
+    /1\. \[P1\] finding-b \(src\/auth\.ts:10-12\): Refresh token expires too early\.\n2\. \[P2\] finding-a \(src\/auth\.ts:10-12\): Retry loop hides failures\./,
+  );
+});
+
+test("buildReviewFixPrompt omits blank additional context", () => {
+  const prompt = buildReviewFixPrompt({
+    reviewRunId: "review-run-1",
+    targetHint: "origin/main",
+    fixContext: "   \n\t  ",
+    comments: [reviewComment("finding-a", "P2", "Retry loop hides failures.")],
+  });
+
+  assert.doesNotMatch(prompt, /Additional human context for this fix loop:/);
+  assert.match(prompt, /Work through comments in order:\n1\. \[P2\]/);
+});
 
 test("buildReviewPromptDraftRequest embeds small diffs with rubric and tool instructions", () => {
   const request = buildReviewPromptDraftRequest(diffTarget(), {
