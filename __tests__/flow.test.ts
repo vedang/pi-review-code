@@ -35,6 +35,21 @@ function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
   };
 }
 
+type InputWidgetResult =
+  | { submitted: true; primaryValue: string; reviewContext?: string }
+  | { submitted: false };
+
+type InputWidgetCall = {
+  kind: string;
+  title: string;
+  helpText: string;
+  primaryLabel: string;
+  primaryPlaceholder: string;
+  contextLabel: string;
+  initialPrimaryValue?: string;
+  initialContext?: string;
+};
+
 type HarnessOptions = {
   hasUI?: boolean;
   model?: { provider: string; id: string } | null;
@@ -44,6 +59,7 @@ type HarnessOptions = {
   target?: ResolvedReviewTarget;
   initialLeafId?: string | null;
   anchorLeafId?: string;
+  inputWidgetResult?: InputWidgetResult;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -64,6 +80,7 @@ function createHarness(options: HarnessOptions = {}) {
   const startedRuns: unknown[] = [];
   const clearedRuns: unknown[] = [];
   const editorInputs: Array<{ title: string; initialValue: string }> = [];
+  const inputWidgetCalls: InputWidgetCall[] = [];
   const resolvedTargets: unknown[] = [];
   const draftRequests: unknown[] = [];
   const draftOptions: unknown[] = [];
@@ -132,6 +149,14 @@ function createHarness(options: HarnessOptions = {}) {
     createRunId: () => "review-1",
     getNow: () => 456,
     getThinkingLevel: () => "high",
+    ...(options.inputWidgetResult === undefined
+      ? {}
+      : {
+          showInputWidget: async (_ctx: unknown, config: InputWidgetCall) => {
+            inputWidgetCalls.push(config);
+            return options.inputWidgetResult ?? { submitted: false };
+          },
+        }),
   });
 
   const ctx = {
@@ -184,6 +209,7 @@ function createHarness(options: HarnessOptions = {}) {
     startedRuns,
     clearedRuns,
     editorInputs,
+    inputWidgetCalls,
     resolvedTargets,
     draftRequests,
     draftOptions,
@@ -227,6 +253,157 @@ test("review flow launches branch after human submits generated prompt", async (
     },
   ]);
   assert.equal(harness.draftRequests.length, 1);
+});
+
+test("review flow prompts for target and context before launching", async () => {
+  const harness = createHarness({
+    editorResult: "Edited review prompt",
+    inputWidgetResult: {
+      submitted: true,
+      primaryValue: "review auth boundaries",
+      reviewContext: "Focus on token refresh races.",
+    },
+  });
+
+  await harness.controller.handleReviewCommand("", harness.ctx);
+
+  assert.equal(harness.inputWidgetCalls.length, 1);
+  assert.deepEqual(harness.inputWidgetCalls[0], {
+    kind: "review",
+    title: "Start review",
+    helpText: "Usage:\n  /review <review request>",
+    primaryLabel: "what do I review?",
+    primaryPlaceholder: "Describe the code, behavior, or risk to review.",
+    contextLabel: "any context I should be aware of?",
+  });
+  assert.deepEqual(harness.resolvedTargets, [
+    {
+      kind: "prompt",
+      prompt: "review auth boundaries",
+      targetHint: "review auth boundaries",
+      reviewContext: "Focus on token refresh races.",
+    },
+  ]);
+  assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
+});
+
+test("review flow pre-fills widget from command args", async () => {
+  const harness = createHarness({
+    editorResult: "Edited review prompt",
+    inputWidgetResult: {
+      submitted: true,
+      primaryValue: "review auth boundaries",
+    },
+  });
+
+  await harness.controller.handleReviewCommand(
+    "review auth boundaries",
+    harness.ctx,
+  );
+
+  assert.equal(
+    harness.inputWidgetCalls[0]?.initialPrimaryValue,
+    "review auth boundaries",
+  );
+  assert.deepEqual(harness.resolvedTargets, [
+    {
+      kind: "prompt",
+      prompt: "review auth boundaries",
+      targetHint: "review auth boundaries",
+    },
+  ]);
+});
+
+test("review flow prompts selector commands with target context", async () => {
+  const diffHarness = createHarness({
+    editorResult: "Edited diff prompt",
+    inputWidgetResult: {
+      submitted: true,
+      primaryValue: "origin/main",
+      reviewContext: "Only review auth middleware changes.",
+    },
+  });
+
+  await diffHarness.controller.handleReviewDiffAgainstCommand(
+    "origin/main",
+    diffHarness.ctx,
+  );
+
+  assert.equal(diffHarness.inputWidgetCalls[0]?.kind, "diff-against");
+  assert.equal(
+    diffHarness.inputWidgetCalls[0]?.initialPrimaryValue,
+    "origin/main",
+  );
+  assert.deepEqual(diffHarness.resolvedTargets, [
+    {
+      kind: "diff-against",
+      ref: "origin/main",
+      targetHint: "origin/main",
+      reviewContext: "Only review auth middleware changes.",
+    },
+  ]);
+
+  const prHarness = createHarness({
+    editorResult: "Edited PR prompt",
+    inputWidgetResult: {
+      submitted: true,
+      primaryValue: "123",
+      reviewContext: "Regression report says logout is flaky.",
+    },
+  });
+
+  await prHarness.controller.handleReviewPrCommand("123", prHarness.ctx);
+
+  assert.equal(prHarness.inputWidgetCalls[0]?.kind, "pr");
+  assert.equal(prHarness.inputWidgetCalls[0]?.initialPrimaryValue, "123");
+  assert.deepEqual(prHarness.resolvedTargets, [
+    {
+      kind: "pr",
+      selector: "123",
+      targetHint: "123",
+      reviewContext: "Regression report says logout is flaky.",
+    },
+  ]);
+});
+
+test("review flow cancels before target resolution when widget is dismissed", async () => {
+  const harness = createHarness({
+    inputWidgetResult: { submitted: false },
+  });
+
+  await harness.controller.handleReviewCommand(
+    "review auth boundaries",
+    harness.ctx,
+  );
+
+  assert.equal(harness.inputWidgetCalls.length, 1);
+  assert.deepEqual(harness.resolvedTargets, []);
+  assert.deepEqual(harness.draftRequests, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.notifications, [
+    { message: "Review cancelled.", level: "info" },
+  ]);
+});
+
+test("review flow checks active model before showing widget", async () => {
+  const harness = createHarness({
+    model: null,
+    inputWidgetResult: {
+      submitted: true,
+      primaryValue: "review auth boundaries",
+    },
+  });
+
+  await harness.controller.handleReviewCommand("", harness.ctx);
+
+  assert.deepEqual(harness.inputWidgetCalls, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.notifications, [
+    {
+      message: "Cannot start review: no active model is selected.",
+      level: "error",
+    },
+  ]);
 });
 
 test("review flow anchors an empty session before branch launch", async () => {

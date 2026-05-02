@@ -200,6 +200,75 @@ function parseReviewSelectorArgs(
   };
 }
 
+export function buildReviewCommandFromInput(input: {
+  prompt: string;
+  reviewContext?: string;
+}): ReviewCommand {
+  const prompt = requireNonBlank(input.prompt, REVIEW_USAGE);
+
+  const reviewContext = input.reviewContext?.trim();
+
+  return {
+    kind: "review",
+    target: {
+      kind: "prompt",
+      prompt,
+      targetHint: prompt,
+      ...(reviewContext === undefined || reviewContext.length === 0
+        ? {}
+        : { reviewContext }),
+    },
+  };
+}
+
+export function buildReviewDiffAgainstCommandFromInput(input: {
+  ref: string;
+  reviewContext?: string;
+}): ReviewCommand {
+  const ref = requireNonBlank(
+    input.ref,
+    "/review-diff-against requires a ref or change id.",
+  );
+
+  const reviewContext = input.reviewContext?.trim();
+
+  return {
+    kind: "review",
+    target: {
+      kind: "diff-against",
+      ref,
+      targetHint: ref,
+      ...(reviewContext === undefined || reviewContext.length === 0
+        ? {}
+        : { reviewContext }),
+    },
+  };
+}
+
+export function buildReviewPrCommandFromInput(input: {
+  selector: string;
+  reviewContext?: string;
+}): ReviewCommand {
+  const selector = requireNonBlank(
+    input.selector,
+    "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
+  );
+
+  const reviewContext = input.reviewContext?.trim();
+
+  return {
+    kind: "review",
+    target: {
+      kind: "pr",
+      selector,
+      targetHint: selector,
+      ...(reviewContext === undefined || reviewContext.length === 0
+        ? {}
+        : { reviewContext }),
+    },
+  };
+}
+
 function parseFindingIds(args: string[]): string[] {
   const rawFindingIds = args;
   if (rawFindingIds.length === 0) {

@@ -6,6 +6,9 @@ import {
   REVIEW_FIX_USAGE,
   REVIEW_PR_USAGE,
   REVIEW_USAGE,
+  buildReviewCommandFromInput,
+  buildReviewDiffAgainstCommandFromInput,
+  buildReviewPrCommandFromInput,
   parseReviewArgs,
   parseReviewDiffAgainstArgs,
   parseReviewFixArgs,
@@ -72,6 +75,37 @@ test("rejects missing /review request with exact usage", () => {
   assert.throws(() => parseReviewArgs(""), new Error(REVIEW_USAGE));
 });
 
+test("builds /review command from widget input with optional context", () => {
+  assert.deepEqual(
+    buildReviewCommandFromInput({
+      prompt: "  review auth boundaries  ",
+      reviewContext: "\nFocus on token refresh races.\n",
+    }),
+    {
+      kind: "review",
+      target: {
+        kind: "prompt",
+        prompt: "review auth boundaries",
+        targetHint: "review auth boundaries",
+        reviewContext: "Focus on token refresh races.",
+      },
+    },
+  );
+
+  assert.deepEqual(
+    buildReviewCommandFromInput({
+      prompt: "review auth boundaries",
+      reviewContext: "   ",
+    }),
+    reviewPromptCommand("review auth boundaries"),
+  );
+
+  assert.throws(
+    () => buildReviewCommandFromInput({ prompt: "   " }),
+    new Error(REVIEW_USAGE),
+  );
+});
+
 const singleTargetCommandCases = [
   {
     commandName: "review-diff-against",
@@ -98,6 +132,43 @@ const singleTargetCommandCases = [
       "/review-pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
   },
 ] as const;
+
+test("builds selector review commands from widget input with optional context", () => {
+  assert.deepEqual(
+    buildReviewDiffAgainstCommandFromInput({
+      ref: " origin/main ",
+      reviewContext: "Changed auth middleware.",
+    }),
+    {
+      kind: "review",
+      target: {
+        kind: "diff-against",
+        ref: "origin/main",
+        targetHint: "origin/main",
+        reviewContext: "Changed auth middleware.",
+      },
+    },
+  );
+
+  assert.deepEqual(
+    buildReviewPrCommandFromInput({
+      selector: " 123 ",
+      reviewContext: "   ",
+    }),
+    reviewPrCommand("123"),
+  );
+
+  assert.throws(
+    () => buildReviewDiffAgainstCommandFromInput({ ref: "" }),
+    new Error("/review-diff-against requires a ref or change id."),
+  );
+  assert.throws(
+    () => buildReviewPrCommandFromInput({ selector: "" }),
+    new Error(
+      "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
+    ),
+  );
+});
 
 for (const testCase of singleTargetCommandCases) {
   test(`parses /${testCase.commandName} target`, () => {

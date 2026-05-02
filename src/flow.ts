@@ -6,7 +6,12 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 
 import {
+  REVIEW_DIFF_AGAINST_USAGE,
   REVIEW_FIX_USAGE,
+  REVIEW_PR_USAGE,
+  buildReviewCommandFromInput,
+  buildReviewDiffAgainstCommandFromInput,
+  buildReviewPrCommandFromInput,
   parseReviewArgs,
   parseReviewDiffAgainstArgs,
   parseReviewFixArgs,
@@ -119,6 +124,80 @@ export type ReviewSessionBeforeTreeResult = {
     summary: string;
     details: ReviewBranchSummaryDetails | FixBranchSummaryDetails;
   };
+};
+
+type ReviewInputWidgetKind = "review" | "diff-against" | "pr";
+
+type ReviewInputWidgetConfig = {
+  kind: ReviewInputWidgetKind;
+  title: string;
+  helpText: string;
+  primaryLabel: string;
+  primaryPlaceholder: string;
+  contextLabel: string;
+  initialPrimaryValue?: string;
+  initialContext?: string;
+};
+
+type ReviewInputWidgetResult =
+  | {
+      submitted: true;
+      primaryValue: string;
+      reviewContext?: string;
+    }
+  | {
+      submitted: false;
+    };
+
+type ShowInputWidget = (
+  ctx: ExtensionCommandContext,
+  config: ReviewInputWidgetConfig,
+) => Promise<ReviewInputWidgetResult>;
+
+const REVIEW_WIDGET_HELP_TEXT = "Usage:\n  /review <review request>";
+const REVIEW_WIDGET_PRIMARY_LABEL = "what do I review?";
+const REVIEW_WIDGET_PRIMARY_PLACEHOLDER =
+  "Describe the code, behavior, or risk to review.";
+const REVIEW_WIDGET_CONTEXT_LABEL = "any context I should be aware of?";
+
+const REVIEW_DIFF_AGAINST_WIDGET_PRIMARY_LABEL = "ref:";
+const REVIEW_DIFF_AGAINST_WIDGET_PRIMARY_PLACEHOLDER =
+  "Enter ref or change id.";
+const REVIEW_PR_WIDGET_PRIMARY_LABEL = "pr:";
+const REVIEW_PR_WIDGET_PRIMARY_PLACEHOLDER =
+  "Enter GitHub URL, GitLab URL, or PR number.";
+
+const REVIEW_WIDGET_CANCELLED_MESSAGE = "Review cancelled.";
+const REVIEW_NO_ACTIVE_MODEL_ERROR =
+  "Cannot start review: no active model is selected.";
+
+const REVIEW_WIDGET_INVALID_ARGS_ERROR =
+  "Cannot start review: invalid command arguments.";
+
+const REVIEW_WIDGET_BASE_TITLE = "Start review";
+
+const REVIEW_DIFF_AGAINST_WIDGET = {
+  kind: "diff-against" as const,
+  helpText: REVIEW_DIFF_AGAINST_USAGE,
+  primaryLabel: REVIEW_DIFF_AGAINST_WIDGET_PRIMARY_LABEL,
+  primaryPlaceholder: REVIEW_DIFF_AGAINST_WIDGET_PRIMARY_PLACEHOLDER,
+  contextLabel: REVIEW_WIDGET_CONTEXT_LABEL,
+};
+
+const REVIEW_PR_WIDGET = {
+  kind: "pr" as const,
+  helpText: REVIEW_PR_USAGE,
+  primaryLabel: REVIEW_PR_WIDGET_PRIMARY_LABEL,
+  primaryPlaceholder: REVIEW_PR_WIDGET_PRIMARY_PLACEHOLDER,
+  contextLabel: REVIEW_WIDGET_CONTEXT_LABEL,
+};
+
+const REVIEW_WIDGET_BASE = {
+  kind: "review" as const,
+  helpText: REVIEW_WIDGET_HELP_TEXT,
+  primaryLabel: REVIEW_WIDGET_PRIMARY_LABEL,
+  primaryPlaceholder: REVIEW_WIDGET_PRIMARY_PLACEHOLDER,
+  contextLabel: REVIEW_WIDGET_CONTEXT_LABEL,
 };
 
 const REVIEW_COMMENT_PRIORITY_SET = new Set<ReviewComment["priority"]>(
@@ -784,6 +863,7 @@ type ReviewFlowDependencies = {
   getThinkingLevel: () => PiReviewThinkingLevel;
   createRunId: () => string;
   getNow: () => number;
+  showInputWidget?: ShowInputWidget;
 };
 
 type ReviewRunInfo = {
@@ -1022,8 +1102,50 @@ export function createReviewFlowController(
   }
 
   type ReviewCommandParser = (args: string) => { target: ReviewTarget };
+  type ReviewWidgetSpec = {
+    template: {
+      kind: ReviewInputWidgetKind;
+      helpText: string;
+      primaryLabel: string;
+      primaryPlaceholder: string;
+      contextLabel: string;
+    };
+    extractInitialPrimaryValue: (command: { target: ReviewTarget }) => string;
+    buildTargetFromInput: (input: {
+      primaryValue: string;
+      reviewContext?: string;
+    }) => ReviewTarget;
+  };
 
-  function createReviewCommandHandler(parser: ReviewCommandParser) {
+  function buildWidgetConfig(
+    template: ReviewWidgetSpec["template"],
+    initialPrimaryValue?: string,
+    initialContext?: string,
+  ): ReviewInputWidgetConfig {
+    const config: ReviewInputWidgetConfig = {
+      ...template,
+      title: REVIEW_WIDGET_BASE_TITLE,
+    };
+
+    if (initialPrimaryValue !== undefined) {
+      config.initialPrimaryValue = initialPrimaryValue;
+    }
+
+    if (initialContext !== undefined) {
+      config.initialContext = initialContext;
+    }
+
+    return config;
+  }
+
+  function getErrorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error ? error.message : fallback;
+  }
+
+  function createReviewCommandHandler(
+    parser: ReviewCommandParser,
+    widgetSpec: ReviewWidgetSpec,
+  ) {
     return async (
       args: string,
       ctx: ExtensionCommandContext,
@@ -1032,28 +1154,125 @@ export function createReviewFlowController(
         return;
       }
 
-      let command: { target: ReviewTarget };
+      if (dependencies.showInputWidget === undefined) {
+        let command: { target: ReviewTarget };
+        try {
+          command = parser(args);
+        } catch (error) {
+          ctx.ui.notify(
+            getErrorMessage(error, REVIEW_WIDGET_INVALID_ARGS_ERROR),
+            "error",
+          );
+          return;
+        }
+
+        await launchReview(command.target, ctx);
+        return;
+      }
+
+      if (ctx.model === undefined) {
+        ctx.ui.notify(REVIEW_NO_ACTIVE_MODEL_ERROR, "error");
+        return;
+      }
+
+      let initialPrimaryValue: string | undefined;
+      if (args.trim().length > 0) {
+        let command: { target: ReviewTarget };
+        try {
+          command = parser(args);
+        } catch (error) {
+          ctx.ui.notify(
+            getErrorMessage(error, REVIEW_WIDGET_INVALID_ARGS_ERROR),
+            "error",
+          );
+          return;
+        }
+
+        try {
+          initialPrimaryValue = widgetSpec.extractInitialPrimaryValue(command);
+        } catch (error) {
+          ctx.ui.notify(
+            getErrorMessage(error, REVIEW_WIDGET_INVALID_ARGS_ERROR),
+            "error",
+          );
+          return;
+        }
+      }
+
+      const input = await dependencies.showInputWidget(
+        ctx,
+        buildWidgetConfig(widgetSpec.template, initialPrimaryValue, undefined),
+      );
+      if (input.submitted === false) {
+        ctx.ui.notify(REVIEW_WIDGET_CANCELLED_MESSAGE, "info");
+        return;
+      }
+
+      let target: ReviewTarget;
       try {
-        command = parser(args);
+        target = widgetSpec.buildTargetFromInput(input);
       } catch (error) {
         ctx.ui.notify(
-          error instanceof Error
-            ? error.message
-            : "Cannot start review: invalid command arguments.",
+          getErrorMessage(error, REVIEW_WIDGET_INVALID_ARGS_ERROR),
           "error",
         );
         return;
       }
 
-      await launchReview(command.target, ctx);
+      await launchReview(target, ctx);
     };
   }
 
-  const handleReviewCommand = createReviewCommandHandler(parseReviewArgs);
+  const handleReviewCommand = createReviewCommandHandler(parseReviewArgs, {
+    template: REVIEW_WIDGET_BASE,
+    extractInitialPrimaryValue: (command) => {
+      if (command.target.kind !== "prompt") {
+        throw new Error(REVIEW_WIDGET_INVALID_ARGS_ERROR);
+      }
+
+      return command.target.prompt;
+    },
+    buildTargetFromInput: (input) =>
+      buildReviewCommandFromInput({
+        prompt: input.primaryValue,
+        reviewContext: input.reviewContext,
+      }).target,
+  });
+
   const handleReviewDiffAgainstCommand = createReviewCommandHandler(
     parseReviewDiffAgainstArgs,
+    {
+      template: REVIEW_DIFF_AGAINST_WIDGET,
+      extractInitialPrimaryValue: (command) => {
+        if (command.target.kind !== "diff-against") {
+          throw new Error(REVIEW_WIDGET_INVALID_ARGS_ERROR);
+        }
+
+        return command.target.ref;
+      },
+      buildTargetFromInput: (input) =>
+        buildReviewDiffAgainstCommandFromInput({
+          ref: input.primaryValue,
+          reviewContext: input.reviewContext,
+        }).target,
+    },
   );
-  const handleReviewPrCommand = createReviewCommandHandler(parseReviewPrArgs);
+
+  const handleReviewPrCommand = createReviewCommandHandler(parseReviewPrArgs, {
+    template: REVIEW_PR_WIDGET,
+    extractInitialPrimaryValue: (command) => {
+      if (command.target.kind !== "pr") {
+        throw new Error(REVIEW_WIDGET_INVALID_ARGS_ERROR);
+      }
+
+      return command.target.selector;
+    },
+    buildTargetFromInput: (input) =>
+      buildReviewPrCommandFromInput({
+        selector: input.primaryValue,
+        reviewContext: input.reviewContext,
+      }).target,
+  });
 
   async function startFixRunIfSupported(
     ctx: ExtensionCommandContext,
