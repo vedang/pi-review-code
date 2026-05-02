@@ -29,6 +29,42 @@ import {
   parseGitLabMrSelector,
 } from "./gitlab.js";
 
+const MAX_DIFF_AGAINST_CHANGES_FOR_FULL_DIFF = 400;
+
+function getDiffStatChangeCount(diffStat: string): number {
+  const summaryMatch = diffStat.match(
+    /\d+\s+files?\s+changed(?:,\s*(\d+)\s+insertions?\(\+\))?(?:,\s*(\d+)\s+deletions?\(-\))?/,
+  );
+  if (summaryMatch !== null) {
+    const insertions = summaryMatch[1] ? Number(summaryMatch[1]) : 0;
+    const deletions = summaryMatch[2] ? Number(summaryMatch[2]) : 0;
+    if (insertions + deletions > 0) {
+      return insertions + deletions;
+    }
+  }
+
+  let total = 0;
+  for (const match of diffStat.matchAll(/\|\s*(\d+)\s+[+-]+/g)) {
+    total += Number(match[1]);
+  }
+  if (total > 0) {
+    return total;
+  }
+
+  let fallbackTotal = 0;
+  for (const match of diffStat.matchAll(
+    /(\d+)\s+insertions?\(\+\)|\b(\d+)\s+deletions?\(-\)/g,
+  )) {
+    if (match[1] !== undefined) {
+      fallbackTotal += Number(match[1]);
+    } else {
+      fallbackTotal += Number(match[2]);
+    }
+  }
+
+  return fallbackTotal;
+}
+
 function commandHint(
   label: string,
   command: string,
@@ -63,15 +99,24 @@ export async function resolveReviewTarget(
     const showDiffCommand = buildGitDiffCommand(ref);
     const showFileDiffCommand = buildGitDiffForFileCommand(ref, "<file>");
 
-    const [listResult, statResult, diffResult] = await Promise.all([
+    const [listResult, statResult] = await Promise.all([
       context.exec(listCommand.command, listCommand.args),
       context.exec(statCommand.command, statCommand.args),
-      context.exec(showDiffCommand.command, showDiffCommand.args),
     ]);
 
     const files = normalizeGitFileList(getStdout(listResult));
     const diffStat = getStdout(statResult).trim();
-    const diffText = getStdout(diffResult);
+    const shouldShowDiff =
+      getDiffStatChangeCount(diffStat) <=
+      MAX_DIFF_AGAINST_CHANGES_FOR_FULL_DIFF;
+    let diffText: string | undefined;
+    if (shouldShowDiff) {
+      const diffResult = await context.exec(
+        showDiffCommand.command,
+        showDiffCommand.args,
+      );
+      diffText = getStdout(diffResult);
+    }
 
     const resolved: ResolvedDiffAgainstTarget = {
       kind: "diff-against",
@@ -79,7 +124,7 @@ export async function resolveReviewTarget(
       ref,
       files,
       diffStat,
-      diffText,
+      ...(diffText !== undefined ? { diffText } : {}),
       commandHints: [
         commandHint(
           "List changed files",

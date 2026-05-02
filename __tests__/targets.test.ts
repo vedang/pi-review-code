@@ -15,6 +15,26 @@ function fakeExec(responses: Record<string, string>): ExecCommand {
   };
 }
 
+function recordingExec(responses: Record<string, string>): {
+  exec: ExecCommand;
+  calls: string[];
+} {
+  const calls: string[] = [];
+
+  return {
+    calls,
+    exec: async (command, args) => {
+      const key = [command, ...args].join("\0");
+      calls.push(key);
+      const stdout = responses[key];
+      if (stdout === undefined) {
+        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      }
+      return { stdout, stderr: "", exitCode: 0 };
+    },
+  };
+}
+
 test("resolveReviewTarget resolves diff-against with safe command hints", async () => {
   const target = await resolveReviewTarget(
     { kind: "diff-against", ref: "origin/main", targetHint: "origin/main" },
@@ -56,6 +76,28 @@ test("resolveReviewTarget resolves diff-against with safe command hints", async 
       },
     ],
   });
+});
+
+test("resolveReviewTarget skips full diff when diff stat is large", async () => {
+  const exec = recordingExec({
+    [["git", "--no-pager", "diff", "origin/main", "--name-only"].join("\0")]:
+      "src/huge.ts\n",
+    [["git", "--no-pager", "diff", "origin/main", "--stat"].join("\0")]:
+      " src/huge.ts | 10000 +++++++++++++++++++++++++++++++++++++\n 1 file changed, 10000 insertions(+)",
+  });
+
+  const target = await resolveReviewTarget(
+    { kind: "diff-against", ref: "origin/main", targetHint: "origin/main" },
+    { exec: exec.exec },
+  );
+
+  assert.equal(target.kind, "diff-against");
+  assert.deepEqual(target.files, ["src/huge.ts"]);
+  assert.equal("diffText" in target, false);
+  assert.deepEqual(exec.calls, [
+    ["git", "--no-pager", "diff", "origin/main", "--name-only"].join("\0"),
+    ["git", "--no-pager", "diff", "origin/main", "--stat"].join("\0"),
+  ]);
 });
 
 test("resolveReviewTarget rejects unsafe diff refs before exec", async () => {
