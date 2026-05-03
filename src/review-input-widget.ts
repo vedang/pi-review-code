@@ -334,15 +334,5 @@ export function showReviewInputWidget(
   return ctx.ui.custom<ReviewInputWidgetResult>(
     (tui, theme, _keybindings, done) =>
       createReviewInputWidgetComponent({ tui, theme, config, done }),
-    {
-      overlay: true,
-      overlayOptions: {
-        width: "80%",
-        minWidth: 48,
-        maxHeight: "85%",
-        anchor: "center",
-        margin: 2,
-      },
-    },
   );
 }

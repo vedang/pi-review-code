@@ -180,18 +180,13 @@ test("Escape cancels the widget", () => {
   assert.deepEqual(results, [{ submitted: false }]);
 });
 
-test("showReviewInputWidget opens an overlay custom UI", async () => {
-  let overlay: boolean | undefined;
-  let minWidth: number | undefined;
+test("showReviewInputWidget uses default custom UI placement", async () => {
+  let customOptions: unknown = "not-called";
 
   const ctx = {
     ui: {
-      custom: async <T>(
-        _factory: unknown,
-        options?: { overlay?: boolean; overlayOptions?: { minWidth?: number } },
-      ): Promise<T> => {
-        overlay = options?.overlay;
-        minWidth = options?.overlayOptions?.minWidth;
+      custom: async <T>(_factory: unknown, options?: unknown): Promise<T> => {
+        customOptions = options;
         return { submitted: false } as T;
       },
     },
@@ -200,6 +195,5 @@ test("showReviewInputWidget opens an overlay custom UI", async () => {
   const result = await showReviewInputWidget(ctx as never, baseConfig);
 
   assert.deepEqual(result, { submitted: false });
-  assert.equal(overlay, true);
-  assert.equal(minWidth, 48);
+  assert.equal(customOptions, undefined);
 });

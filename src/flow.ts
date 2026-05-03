@@ -128,10 +128,10 @@ export type ReviewFixWidgetFinding = {
 export type ReviewFixWidgetData =
   | {
       ok: true;
-      reviewRunId: string;
-      targetHint: string;
-      completedAt: number;
       findings: ReviewFixWidgetFinding[];
+      reviewRunId?: string;
+      targetHint?: string;
+      completedAt?: number;
     }
   | {
       ok: false;
@@ -203,7 +203,7 @@ const REVIEW_WIDGET_BASE_TITLE = "Start review";
 
 const REVIEW_FIX_WIDGET_TITLE = "Start review fix";
 const REVIEW_FIX_WIDGET_HELP_TEXT =
-  "Select one or more findings from the latest completed review and start a focused fix run.";
+  "Select unfixed findings from completed reviews and start a focused fix run.";
 const REVIEW_FIX_BARE_HELP_MESSAGE =
   "Run /review-fix and select findings in the widget.";
 const REVIEW_FIX_REVALIDATE_ERROR =
@@ -609,21 +609,6 @@ function parseFixSummaryForFixEntry(
   };
 }
 
-function chooseLatestReviewSummary(
-  a: ParsedReviewSummaryForFix,
-  b: ParsedReviewSummaryForFix,
-): ParsedReviewSummaryForFix {
-  if (a.completedAt > b.completedAt) {
-    return a;
-  }
-
-  if (a.completedAt < b.completedAt) {
-    return b;
-  }
-
-  return a.order > b.order ? a : b;
-}
-
 function reviewFindingKey(reviewRunId: string, findingId: string): string {
   return `${reviewRunId}:${findingId}`;
 }
@@ -657,31 +642,62 @@ function scanReviewFixEntries(entries: unknown[]): ReviewFixEntryScan {
   return { reviews, fixedFindingKeys };
 }
 
-function findLatestReview(
+function sortReviewSummariesByRecency(
   reviews: ParsedReviewSummaryForFix[],
-): ParsedReviewSummaryForFix | undefined {
-  return reviews.reduce<ParsedReviewSummaryForFix | undefined>(
-    (latest, review) =>
-      latest === undefined ? review : chooseLatestReviewSummary(review, latest),
-    undefined,
-  );
-}
+): ParsedReviewSummaryForFix[] {
+  return [...reviews].sort((a, b) => {
+    if (a.completedAt > b.completedAt) {
+      return -1;
+    }
 
-function findLatestReviewWithFindings(
-  reviews: ParsedReviewSummaryForFix[],
-): ParsedReviewSummaryForFix | undefined {
-  return findLatestReview(
-    reviews.filter((review) => review.comments.length > 0),
-  );
+    if (a.completedAt < b.completedAt) {
+      return 1;
+    }
+
+    return b.order - a.order;
+  });
 }
 
 export function buildReviewFixWidgetData(
   entries: unknown[],
 ): ReviewFixWidgetData {
   const { reviews, fixedFindingKeys } = scanReviewFixEntries(entries);
-  const latestReviewSummary = findLatestReviewWithFindings(reviews);
+  const sortedReviews = sortReviewSummariesByRecency(reviews);
+  const dedupedReviews: ParsedReviewSummaryForFix[] = [];
+  const reviewedRunIds = new Set<string>();
 
-  if (latestReviewSummary === undefined) {
+  for (const review of sortedReviews) {
+    if (reviewedRunIds.has(review.runId)) {
+      continue;
+    }
+
+    reviewedRunIds.add(review.runId);
+    dedupedReviews.push(review);
+  }
+
+  const findings: ReviewFixWidgetFinding[] = [];
+  for (const review of dedupedReviews) {
+    for (const comment of review.comments) {
+      findings.push({
+        reviewRunId: review.runId,
+        targetHint: review.targetHint,
+        completedAt: review.completedAt,
+        comment,
+        fixed: fixedFindingKeys.has(reviewFindingKey(review.runId, comment.id)),
+      });
+    }
+  }
+
+  const openReviewRunIds = new Set(
+    findings
+      .filter((finding) => !finding.fixed)
+      .map((finding) => finding.reviewRunId),
+  );
+
+  const visibleFindings = findings.filter((finding) =>
+    openReviewRunIds.has(finding.reviewRunId),
+  );
+  if (visibleFindings.length === 0) {
     return {
       ok: false,
       reason: "no-review-findings",
@@ -689,20 +705,22 @@ export function buildReviewFixWidgetData(
     };
   }
 
+  const reviewRunIds = new Set(
+    visibleFindings.map((finding) => finding.reviewRunId),
+  );
+  const hasSingleReviewRun = reviewRunIds.size === 1;
+  const firstVisibleFinding = visibleFindings[0];
+
   return {
     ok: true,
-    reviewRunId: latestReviewSummary.runId,
-    targetHint: latestReviewSummary.targetHint,
-    completedAt: latestReviewSummary.completedAt,
-    findings: latestReviewSummary.comments.map((comment) => ({
-      reviewRunId: latestReviewSummary.runId,
-      targetHint: latestReviewSummary.targetHint,
-      completedAt: latestReviewSummary.completedAt,
-      comment,
-      fixed: fixedFindingKeys.has(
-        reviewFindingKey(latestReviewSummary.runId, comment.id),
-      ),
-    })),
+    findings: visibleFindings,
+    ...(hasSingleReviewRun
+      ? {
+          reviewRunId: firstVisibleFinding?.reviewRunId,
+          targetHint: firstVisibleFinding?.targetHint,
+          completedAt: firstVisibleFinding?.completedAt,
+        }
+      : {}),
   };
 }
 
@@ -1205,9 +1223,9 @@ export function createReviewFlowController(
     result: { reviewRunId: string; findingIds: string[] },
   ): ReviewSummaryForFix | undefined {
     const { reviews, fixedFindingKeys } = scanReviewFixEntries(entries);
-    const selectedReview = findLatestReview(
+    const selectedReview = sortReviewSummariesByRecency(
       reviews.filter((review) => review.runId === result.reviewRunId),
-    );
+    )[0];
 
     if (selectedReview === undefined || selectedReview.comments.length === 0) {
       return undefined;
@@ -1292,6 +1310,9 @@ export function createReviewFlowController(
         comment: finding.comment.comment,
         references: finding.comment.references,
         fixed: finding.fixed,
+        reviewRunId: finding.reviewRunId,
+        targetHint: finding.targetHint,
+        completedAt: finding.completedAt,
       })),
     });
 

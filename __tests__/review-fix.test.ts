@@ -76,7 +76,7 @@ function fixSummaryEntry(
   };
 }
 
-test("buildReviewFixWidgetData chooses latest completed review with all findings", () => {
+test("buildReviewFixWidgetData lists all reviews with open findings newest first", () => {
   const oldFinding = comment({ id: "old", runId: "review-1" });
   const first = comment({ id: "first", runId: "review-2" });
   const second = comment({ id: "second", runId: "review-2" });
@@ -94,32 +94,36 @@ test("buildReviewFixWidgetData chooses latest completed review with all findings
     return;
   }
 
-  assert.equal(result.reviewRunId, "review-2");
-  assert.equal(result.targetHint, "review cache boundaries");
-  assert.equal(result.completedAt, 200);
+  assert.equal(result.reviewRunId, undefined);
+  assert.equal(result.targetHint, undefined);
+  assert.equal(result.completedAt, undefined);
   assert.deepEqual(
     result.findings.map((item) => item.comment.id),
-    ["first", "second"],
+    ["first", "second", "old"],
   );
   assert.deepEqual(
     result.findings.map((item) => item.fixed),
-    [false, false],
+    [false, false, false],
   );
   assert.deepEqual(
     result.findings.map((item) => item.reviewRunId),
-    ["review-2", "review-2"],
+    ["review-2", "review-2", "review-1"],
   );
   assert.deepEqual(
     result.findings.map((item) => item.targetHint),
-    ["review cache boundaries", "review cache boundaries"],
+    [
+      "review cache boundaries",
+      "review cache boundaries",
+      "review auth boundaries",
+    ],
   );
   assert.deepEqual(
     result.findings.map((item) => item.completedAt),
-    [200, 200],
+    [200, 200, 100],
   );
 });
 
-test("buildReviewFixWidgetData marks fixed findings for latest review", () => {
+test("buildReviewFixWidgetData marks fixed findings for a visible review", () => {
   const fixed = comment({ id: "fixed", runId: "review-1" });
   const open = comment({ id: "open", runId: "review-1" });
 
@@ -158,8 +162,38 @@ test("buildReviewFixWidgetData keys fixed findings by review run", () => {
   }
 
   assert.deepEqual(
-    result.findings.map((item) => [item.comment.id, item.fixed]),
-    [["same-id", false]],
+    result.findings.map((item) => [
+      item.reviewRunId,
+      item.comment.id,
+      item.fixed,
+    ]),
+    [["review-2", "same-id", false]],
+  );
+});
+
+test("buildReviewFixWidgetData skips newer reviews with only fixed findings", () => {
+  const oldOpen = comment({ id: "old-open", runId: "review-1" });
+  const newFixed = comment({ id: "new-fixed", runId: "review-2" });
+
+  const result = buildReviewFixWidgetData([
+    reviewSummaryEntry("review-1", [oldOpen], { completedAt: 100 }),
+    reviewSummaryEntry("review-2", [newFixed], { completedAt: 200 }),
+    fixSummaryEntry("fix-1", "review-2", [newFixed]),
+  ]);
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.equal(result.reviewRunId, "review-1");
+  assert.deepEqual(
+    result.findings.map((item) => [
+      item.reviewRunId,
+      item.comment.id,
+      item.fixed,
+    ]),
+    [["review-1", "old-open", false]],
   );
 });
 
@@ -460,7 +494,7 @@ test("review-fix opens empty widget when no completed review findings exist", as
   ]);
 });
 
-test("review-fix widget displays latest completed review", async () => {
+test("review-fix widget displays all open review findings newest first", async () => {
   const harness = createHarness({
     entries: [
       reviewSummaryEntry("review-1", [
@@ -478,14 +512,19 @@ test("review-fix widget displays latest completed review", async () => {
   await harness.controller.handleReviewFixCommand("", harness.ctx);
 
   assert.equal(harness.fixWidgetConfigs.length, 1);
-  assert.equal(harness.fixWidgetConfigs[0]?.reviewRunId, "review-2");
-  assert.equal(
-    harness.fixWidgetConfigs[0]?.targetHint,
-    "review cache boundaries",
-  );
+  assert.equal(harness.fixWidgetConfigs[0]?.reviewRunId, undefined);
+  assert.equal(harness.fixWidgetConfigs[0]?.targetHint, undefined);
   assert.deepEqual(
     harness.fixWidgetConfigs[0]?.findings.map((finding) => finding.id),
-    ["new"],
+    ["new", "old"],
+  );
+  assert.deepEqual(
+    harness.fixWidgetConfigs[0]?.findings.map((finding) => finding.reviewRunId),
+    ["review-2", "review-1"],
+  );
+  assert.deepEqual(
+    harness.fixWidgetConfigs[0]?.findings.map((finding) => finding.targetHint),
+    ["review cache boundaries", "review auth boundaries"],
   );
 });
 

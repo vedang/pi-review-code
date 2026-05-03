@@ -33,7 +33,7 @@ The form asks what to review and accepts optional context. Typed arguments prefi
 
 ### `/review-fix`
 
-Select findings from the latest completed review, optionally add fix context, then start a same-session fix branch.
+Select unfixed findings from completed reviews, optionally add fix context, then start a same-session fix branch.
 
 The fix prompt lists selected comments with priorities, references, and optional fix context. The fix branch collapses back with a summary.
 

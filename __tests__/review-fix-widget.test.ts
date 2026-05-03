@@ -109,6 +109,41 @@ test("review fix widget renders empty state when no findings exist", () => {
   assert.ok(text.includes("Cancel"));
 });
 
+test("review fix widget groups findings from multiple review runs", () => {
+  const { component } = createComponent({
+    ...baseConfig,
+    reviewRunId: undefined,
+    targetHint: undefined,
+    completedAt: undefined,
+    findings: [
+      finding({
+        id: "new",
+        reviewRunId: "review-2",
+        targetHint: "review cache boundaries",
+        completedAt: 1_700_000_000_000,
+      }),
+      finding({
+        id: "old",
+        reviewRunId: "review-1",
+        targetHint: "review auth boundaries",
+        completedAt: 1_600_000_000_000,
+      }),
+    ],
+    initialSelectedFindingIds: [],
+    initialFixContext: undefined,
+  });
+
+  const text = component.render(80).join("\n");
+
+  assert.ok(text.includes("Review runs: 2 with open findings"));
+  assert.ok(text.includes("Review run: review-2"));
+  assert.ok(text.includes("Target: review cache boundaries"));
+  assert.ok(text.includes("Review run: review-1"));
+  assert.ok(text.includes("Target: review auth boundaries"));
+  assert.ok(text.includes("[ ] P1 new"));
+  assert.ok(text.includes("[ ] P1 old"));
+});
+
 test("Space and Enter toggle open findings and submit in displayed order", () => {
   const { component, results } = createComponent({
     ...baseConfig,
@@ -154,6 +189,60 @@ test("fixed findings stay disabled when focused and cannot be toggled", () => {
       findingIds: ["finding-b"],
     },
   ]);
+});
+
+test("selection can submit a finding from an older review run", () => {
+  const { component, results } = createComponent({
+    ...baseConfig,
+    reviewRunId: undefined,
+    targetHint: undefined,
+    completedAt: undefined,
+    findings: [
+      finding({ id: "new", reviewRunId: "review-2" }),
+      finding({ id: "old", reviewRunId: "review-1" }),
+    ],
+    initialSelectedFindingIds: [],
+    initialFixContext: undefined,
+  });
+
+  component.handleInput?.("\x1b[B");
+  component.handleInput?.(" ");
+  component.handleInput?.("\x13");
+
+  assert.deepEqual(results, [
+    {
+      submitted: true,
+      reviewRunId: "review-1",
+      findingIds: ["old"],
+    },
+  ]);
+});
+
+test("selection rejects findings from multiple review runs", () => {
+  const { component, results } = createComponent({
+    ...baseConfig,
+    reviewRunId: undefined,
+    targetHint: undefined,
+    completedAt: undefined,
+    findings: [
+      finding({ id: "new", reviewRunId: "review-2" }),
+      finding({ id: "old", reviewRunId: "review-1" }),
+    ],
+    initialSelectedFindingIds: [],
+    initialFixContext: undefined,
+  });
+
+  component.handleInput?.("a");
+  component.handleInput?.("\x13");
+
+  assert.deepEqual(results, []);
+  assert.ok(
+    component
+      .render(80)
+      .some((line) =>
+        line.includes("Selected findings must come from a single review run."),
+      ),
+  );
 });
 
 test("a selects and clears all open findings", () => {
@@ -341,18 +430,13 @@ test("review fix widget keeps rendered lines within width", () => {
   }
 });
 
-test("showReviewFixWidget opens an overlay custom UI", async () => {
-  let overlay: boolean | undefined;
-  let minWidth: number | undefined;
+test("showReviewFixWidget uses default custom UI placement", async () => {
+  let customOptions: unknown = "not-called";
 
   const ctx = {
     ui: {
-      custom: async <T>(
-        _factory: unknown,
-        options?: { overlay?: boolean; overlayOptions?: { minWidth?: number } },
-      ): Promise<T> => {
-        overlay = options?.overlay;
-        minWidth = options?.overlayOptions?.minWidth;
+      custom: async <T>(_factory: unknown, options?: unknown): Promise<T> => {
+        customOptions = options;
         return { submitted: false } as T;
       },
     },
@@ -361,8 +445,7 @@ test("showReviewFixWidget opens an overlay custom UI", async () => {
   const result = await showReviewFixWidget(ctx as never, baseConfig);
 
   assert.deepEqual(result, { submitted: false });
-  assert.equal(overlay, true);
-  assert.equal(minWidth, 48);
+  assert.equal(customOptions, undefined);
 });
 
 test("normalizeReviewFixWidgetSelection returns selected ids in displayed order and trims context", () => {

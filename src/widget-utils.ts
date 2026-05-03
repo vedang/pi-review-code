@@ -12,6 +12,7 @@ import {
 export const SUBMIT_CANCEL_ACTIONS = ["submit", "cancel"] as const;
 
 export type SubmitCancelAction = (typeof SUBMIT_CANCEL_ACTIONS)[number];
+
 export type WidgetLineAppender = (line?: string) => void;
 
 export type WidgetRenderHelpers = {

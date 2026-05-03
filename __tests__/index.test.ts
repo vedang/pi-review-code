@@ -194,16 +194,7 @@ test("/review-fix opens runtime fix widget with empty args", async () => {
   await runCommand(harness, "review-fix");
 
   assert.equal(harness.customWidgetCalls.length, 1);
-  assert.deepEqual(harness.customWidgetCalls[0]?.options, {
-    overlay: true,
-    overlayOptions: {
-      width: "80%",
-      minWidth: 48,
-      maxHeight: "85%",
-      anchor: "center",
-      margin: 2,
-    },
-  });
+  assert.equal(harness.customWidgetCalls[0]?.options, undefined);
   assertSingleNotification(harness, "Review-fix cancelled.");
 });
 
@@ -230,16 +221,7 @@ for (const commandName of [
     await runCommand(harness, commandName);
 
     assert.equal(harness.customWidgetCalls.length, 1);
-    assert.deepEqual(harness.customWidgetCalls[0]?.options, {
-      overlay: true,
-      overlayOptions: {
-        width: "80%",
-        minWidth: 48,
-        maxHeight: "85%",
-        anchor: "center",
-        margin: 2,
-      },
-    });
+    assert.equal(harness.customWidgetCalls[0]?.options, undefined);
     assertSingleNotification(harness, "Review cancelled.");
   });
 }

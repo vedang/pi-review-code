@@ -28,6 +28,9 @@ export type ReviewFixWidgetFindingInput = {
   comment: string;
   references: AddReviewCommentReference[];
   fixed: boolean;
+  reviewRunId?: string;
+  targetHint?: string;
+  completedAt?: number;
 };
 
 export type ReviewFixWidgetConfig = {
@@ -83,36 +86,82 @@ const REVIEW_FIX_CONTEXT_LABEL =
   "additional context for the fix loop (optional)";
 const REVIEW_FIX_KEY_HINT =
   "Up/Down move • Space toggle • a select all open • Tab/Shift+Tab switch area • Enter/Ctrl+S submit • Alt+Enter newline • Esc cancel";
+const FINDING_SELECTION_KEY_SEPARATOR = "\u001f";
+
+function buildFindingSelectionKey(
+  reviewRunId: string,
+  findingId: string,
+): string {
+  return `${reviewRunId}${FINDING_SELECTION_KEY_SEPARATOR}${findingId}`;
+}
+
+function parseFindingSelectionKey(
+  rawKey: string,
+): { reviewRunId: string; id: string } | null {
+  const separatorIndex = rawKey.indexOf(FINDING_SELECTION_KEY_SEPARATOR);
+  if (separatorIndex < 0) {
+    return null;
+  }
+
+  const reviewRunId = rawKey.slice(0, separatorIndex).trim();
+  const findingId = rawKey.slice(separatorIndex + 1).trim();
+
+  if (reviewRunId.length === 0 || findingId.length === 0) {
+    return null;
+  }
+
+  return { reviewRunId, id: findingId };
+}
+
+type NormalizedReviewFixFinding = ReviewFixWidgetFindingInput & {
+  id: string;
+  reviewRunId: string;
+  selectionKey: string;
+};
 
 export function normalizeReviewFixWidgetSelection(
   input: ReviewFixWidgetSelectionInput,
 ): NormalizedReviewFixWidgetSelection {
-  const normalizedFindings: ReviewFixWidgetFindingInput[] = [];
-  const findingById = new Map<string, ReviewFixWidgetFindingInput>();
+  const normalizedFindings: NormalizedReviewFixFinding[] = [];
+  const findingByKey = new Map<string, NormalizedReviewFixFinding>();
+  const findingKeysById = new Map<string, string[]>();
 
-  for (const finding of input.findings) {
-    const normalizedFindingId = finding.id.trim();
-    if (normalizedFindingId.length === 0) {
+  for (const rawFinding of input.findings) {
+    const normalizedId = rawFinding.id.trim();
+    if (normalizedId.length === 0) {
       return {
         ok: false,
         error: "Review-fix widget data has a blank finding id.",
       };
     }
 
-    if (findingById.has(normalizedFindingId)) {
+    const normalizedReviewRunId = rawFinding.reviewRunId?.trim() ?? "";
+    const selectionKey =
+      normalizedReviewRunId.length > 0
+        ? buildFindingSelectionKey(normalizedReviewRunId, normalizedId)
+        : normalizedId;
+
+    if (findingByKey.has(selectionKey)) {
       return {
         ok: false,
-        error: `Review-fix widget data has duplicate finding id: ${normalizedFindingId}.`,
+        error: `Review-fix widget data has duplicate finding id: ${normalizedId}.`,
       };
     }
 
-    const normalizedFinding: ReviewFixWidgetFindingInput = {
-      ...finding,
-      id: normalizedFindingId,
+    const normalizedFinding: NormalizedReviewFixFinding = {
+      ...rawFinding,
+      id: normalizedId,
+      reviewRunId: normalizedReviewRunId,
+      selectionKey,
     };
 
     normalizedFindings.push(normalizedFinding);
-    findingById.set(normalizedFindingId, normalizedFinding);
+    findingByKey.set(selectionKey, normalizedFinding);
+    const keys = findingKeysById.get(normalizedId);
+    findingKeysById.set(
+      normalizedId,
+      keys === undefined ? [selectionKey] : [...keys, selectionKey],
+    );
   }
 
   const selectableFindingCount = normalizedFindings.filter(
@@ -123,44 +172,90 @@ export function normalizeReviewFixWidgetSelection(
   }
 
   const normalizedReviewRunId = input.reviewRunId?.trim();
-  if (
-    normalizedReviewRunId === undefined ||
-    normalizedReviewRunId.length === 0
-  ) {
-    return { ok: false, error: "No review run is available to fix." };
-  }
 
+  const selectedKeys = new Set<string>();
   for (const selectedId of input.selectedFindingIds) {
-    const normalizedSelectedId = selectedId.trim();
-    const selectedFinding = findingById.get(normalizedSelectedId);
+    const trimmedSelectedId = selectedId.trim();
+    if (trimmedSelectedId.length === 0) {
+      continue;
+    }
 
+    const parsedSelectionKey = parseFindingSelectionKey(trimmedSelectedId);
+    if (parsedSelectionKey === null) {
+      const matchingKeys = findingKeysById.get(trimmedSelectedId) ?? [];
+      if (matchingKeys.length === 0) {
+        return {
+          ok: false,
+          error: `Selected finding is no longer available: ${trimmedSelectedId}.`,
+        };
+      }
+
+      if (matchingKeys.length > 1) {
+        return {
+          ok: false,
+          error: "Selected findings must come from a single review run.",
+        };
+      }
+
+      selectedKeys.add(matchingKeys[0] ?? "");
+      continue;
+    }
+
+    const key = buildFindingSelectionKey(
+      parsedSelectionKey.reviewRunId,
+      parsedSelectionKey.id,
+    );
+    const selectedFinding = findingByKey.get(key);
     if (selectedFinding === undefined) {
       return {
         ok: false,
-        error: `Selected finding is no longer available: ${normalizedSelectedId}.`,
+        error: `Selected finding is no longer available: ${trimmedSelectedId}.`,
+      };
+    }
+
+    selectedKeys.add(key);
+  }
+
+  const normalizedSelectedFindingIds: string[] = [];
+  const selectedFindingRunIds = new Set<string>();
+
+  for (const selectedKey of selectedKeys) {
+    const selectedFinding = findingByKey.get(selectedKey);
+    if (selectedFinding === undefined) {
+      return {
+        ok: false,
+        error: `Selected finding is no longer available: ${selectedKey}.`,
       };
     }
 
     if (selectedFinding.fixed) {
       return {
         ok: false,
-        error: `Selected finding is already fixed: ${normalizedSelectedId}.`,
+        error: `Selected finding is already fixed: ${selectedFinding.id}.`,
       };
+    }
+
+    if (selectedFinding.reviewRunId.length > 0) {
+      selectedFindingRunIds.add(selectedFinding.reviewRunId);
     }
   }
 
-  const selectedIds = new Set(
-    input.selectedFindingIds
-      .map((selectedId) => selectedId.trim())
-      .filter((selectedId) => selectedId.length > 0),
-  );
-  const normalizedSelectedFindingIds: string[] = [];
+  if (selectedFindingRunIds.size > 1) {
+    return {
+      ok: false,
+      error: "Selected findings must come from a single review run.",
+    };
+  }
+
   for (const finding of normalizedFindings) {
     if (finding.fixed) {
       continue;
     }
 
-    if (selectedIds.has(finding.id)) {
+    if (
+      selectedKeys.has(finding.selectionKey) ||
+      selectedKeys.has(finding.id)
+    ) {
       normalizedSelectedFindingIds.push(finding.id);
     }
   }
@@ -169,19 +264,33 @@ export function normalizeReviewFixWidgetSelection(
     return { ok: false, error: "Select at least one finding to fix." };
   }
 
+  const selectedFindingReviewRunId =
+    selectedFindingRunIds.size === 1
+      ? selectedFindingRunIds.values().next().value
+      : undefined;
+
+  const normalizedSelectedReviewRunId =
+    selectedFindingReviewRunId ?? normalizedReviewRunId;
+  if (
+    normalizedSelectedReviewRunId === undefined ||
+    normalizedSelectedReviewRunId.length === 0
+  ) {
+    return { ok: false, error: "No review run is available to fix." };
+  }
+
   const normalizedFixContext = input.fixContext?.trim() ?? "";
 
   if (normalizedFixContext.length === 0) {
     return {
       ok: true,
-      reviewRunId: normalizedReviewRunId,
+      reviewRunId: normalizedSelectedReviewRunId,
       findingIds: normalizedSelectedFindingIds,
     };
   }
 
   return {
     ok: true,
-    reviewRunId: normalizedReviewRunId,
+    reviewRunId: normalizedSelectedReviewRunId,
     findingIds: normalizedSelectedFindingIds,
     fixContext: normalizedFixContext,
   };
@@ -224,6 +333,7 @@ function formatCompletedAt(
 
 class ReviewFixWidgetComponent implements Component, Focusable {
   private readonly contextEditor: Editor;
+  private readonly findings: NormalizedReviewFixFinding[];
   private readonly selectedFindingIds: Set<string>;
   private activeField: ActiveField = "findings";
   private activeFindingIndex = 0;
@@ -246,11 +356,56 @@ class ReviewFixWidgetComponent implements Component, Focusable {
     this.contextEditor.onSubmit = (fixContext) => this.submit(fixContext);
     this.contextEditor.onChange = () => this.handleContextChange();
 
-    this.selectedFindingIds = new Set(
-      (config.initialSelectedFindingIds ?? [])
-        .map((id) => id.trim())
-        .filter((id) => id.length > 0),
-    );
+    const findingKeysById = new Map<string, string[]>();
+    this.findings = config.findings
+      .map((finding) => {
+        const normalizedId = finding.id.trim();
+        const normalizedReviewRunId = finding.reviewRunId?.trim() ?? "";
+        const selectionKey =
+          normalizedReviewRunId.length > 0
+            ? buildFindingSelectionKey(normalizedReviewRunId, normalizedId)
+            : normalizedId;
+        const normalizedFinding: NormalizedReviewFixFinding = {
+          ...finding,
+          id: normalizedId,
+          reviewRunId: normalizedReviewRunId,
+          selectionKey,
+        };
+
+        const keys = findingKeysById.get(normalizedId);
+        findingKeysById.set(
+          normalizedId,
+          keys === undefined ? [selectionKey] : [...keys, selectionKey],
+        );
+
+        return normalizedFinding;
+      })
+      .filter((finding) => finding.id.length > 0);
+
+    const selectedFindingIds = new Set<string>();
+    for (const selectedId of config.initialSelectedFindingIds ?? []) {
+      const normalizedSelectedId = selectedId.trim();
+      if (normalizedSelectedId.length === 0) {
+        continue;
+      }
+
+      const parsedSelectionKey = parseFindingSelectionKey(normalizedSelectedId);
+      if (parsedSelectionKey !== null) {
+        selectedFindingIds.add(
+          buildFindingSelectionKey(
+            parsedSelectionKey.reviewRunId,
+            parsedSelectionKey.id,
+          ),
+        );
+        continue;
+      }
+
+      const matchingKeys = findingKeysById.get(normalizedSelectedId) ?? [];
+      for (const matchingKey of matchingKeys) {
+        selectedFindingIds.add(matchingKey);
+      }
+    }
+    this.selectedFindingIds = selectedFindingIds;
 
     this.updateChildFocus();
   }
@@ -345,20 +500,31 @@ class ReviewFixWidgetComponent implements Component, Focusable {
     const reviewRunId = this.config.reviewRunId?.trim();
     const targetHint = this.config.targetHint?.trim();
     const completedAt = formatCompletedAt(this.config.completedAt);
-    const totalCount = this.config.findings.length;
-    const fixedCount = this.config.findings.filter(
-      (finding) => finding.fixed,
-    ).length;
+    const totalCount = this.findings.length;
+    const fixedCount = this.findings.filter((finding) => finding.fixed).length;
     const openCount = totalCount - fixedCount;
+    const reviewRunIds = this.getActiveReviewRunIds();
 
     if (reviewRunId !== undefined && reviewRunId.length > 0) {
       addLine(this.theme.fg("muted", `Review run: ${reviewRunId}`));
-    }
-    if (targetHint !== undefined && targetHint.length > 0) {
-      addLine(this.theme.fg("muted", `Target: ${targetHint}`));
-    }
-    if (completedAt !== undefined) {
-      addLine(this.theme.fg("muted", `Completed: ${completedAt}`));
+      if (targetHint !== undefined && targetHint.length > 0) {
+        addLine(this.theme.fg("muted", `Target: ${targetHint}`));
+      }
+      if (completedAt !== undefined) {
+        addLine(this.theme.fg("muted", `Completed: ${completedAt}`));
+      }
+    } else if (reviewRunIds.size > 1) {
+      addLine(
+        this.theme.fg(
+          "muted",
+          `Review runs: ${reviewRunIds.size} with open findings`,
+        ),
+      );
+    } else if (reviewRunIds.size === 1) {
+      const firstRun = reviewRunIds.values().next().value;
+      if (firstRun !== undefined && firstRun.length > 0) {
+        addLine(this.theme.fg("muted", `Review run: ${firstRun}`));
+      }
     }
 
     addLine(
@@ -368,11 +534,10 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       ),
     );
   }
-
   private renderFindings(addLine: WidgetLineAppender): void {
     this.renderFieldHeader(addLine, "findings", "findings");
 
-    if (this.config.findings.length === 0) {
+    if (this.findings.length === 0) {
       addLine(
         this.theme.fg(
           "warning",
@@ -390,20 +555,37 @@ class ReviewFixWidgetComponent implements Component, Focusable {
 
     const visibleRange = this.getVisibleFindingRange();
 
-    if (this.config.findings.length > this.getMaxVisibleFindings()) {
+    if (this.findings.length > this.getMaxVisibleFindings()) {
       addLine(
         this.theme.fg(
           "dim",
-          `  showing ${visibleRange.start + 1}-${visibleRange.end} of ${this.config.findings.length}`,
+          `  showing ${visibleRange.start + 1}-${visibleRange.end} of ${this.findings.length}`,
         ),
       );
     }
 
+    let previousReviewRunId: string | undefined;
     for (let index = visibleRange.start; index < visibleRange.end; index += 1) {
-      const finding = this.config.findings[index];
+      const finding = this.findings[index];
       if (finding === undefined) {
         continue;
       }
+
+      const currentReviewRunId = this.getReviewRunId(finding);
+      if (currentReviewRunId !== previousReviewRunId) {
+        const targetHint = this.getFindingTargetHint(finding);
+        const completedAt = formatCompletedAt(
+          this.getFindingCompletedAt(finding),
+        );
+        const metaParts = [
+          `Review run: ${currentReviewRunId}`,
+          ...(targetHint.length > 0 ? [`Target: ${targetHint}`] : []),
+          ...(completedAt === undefined ? [] : [`Completed: ${completedAt}`]),
+        ];
+
+        addLine(this.theme.fg("dim", `  ${metaParts.join(" • ")}`));
+      }
+
       const activeMarker =
         index === this.activeFindingIndex ? this.theme.fg("accent", "›") : " ";
       const checkbox = this.renderCheckbox(finding);
@@ -411,23 +593,70 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       const preview = firstCommentLine(finding.comment);
       const row = `${activeMarker} ${checkbox} ${finding.priority} ${finding.id.trim()} ${refs} ${preview}`;
       addLine(`  ${row}`);
+      previousReviewRunId = currentReviewRunId;
     }
   }
-
-  private renderCheckbox(finding: ReviewFixWidgetFindingInput): string {
+  private renderCheckbox(finding: NormalizedReviewFixFinding): string {
     if (finding.fixed) {
       return this.theme.fg("muted", "[−] fixed");
     }
 
-    if (this.selectedFindingIds.has(finding.id.trim())) {
+    if (
+      this.selectedFindingIds.has(finding.selectionKey) ||
+      this.selectedFindingIds.has(finding.id)
+    ) {
       return this.theme.fg("accent", "[x]");
     }
 
     return "[ ]";
   }
 
+  private getReviewRunId(finding: NormalizedReviewFixFinding): string {
+    return finding.reviewRunId.length > 0
+      ? finding.reviewRunId
+      : (this.config.reviewRunId?.trim() ?? "");
+  }
+
+  private getFindingTargetHint(finding: NormalizedReviewFixFinding): string {
+    const findingTargetHint = finding.targetHint?.trim();
+    if (findingTargetHint !== undefined && findingTargetHint.length > 0) {
+      return findingTargetHint;
+    }
+
+    return this.config.targetHint?.trim() ?? "";
+  }
+
+  private getFindingCompletedAt(
+    finding: NormalizedReviewFixFinding,
+  ): number | undefined {
+    if (finding.completedAt !== undefined) {
+      return finding.completedAt;
+    }
+
+    return this.config.completedAt;
+  }
+
+  private getActiveReviewRunIds(): Set<string> {
+    const runIds = new Set<string>();
+    for (const finding of this.findings) {
+      const runId = this.getReviewRunId(finding);
+      if (runId.length > 0) {
+        runIds.add(runId);
+      }
+    }
+
+    if (runIds.size === 0 && this.config.reviewRunId !== undefined) {
+      const trimmedRunId = this.config.reviewRunId.trim();
+      if (trimmedRunId.length > 0) {
+        runIds.add(trimmedRunId);
+      }
+    }
+
+    return runIds;
+  }
+
   private handleFindingInput(data: string): void {
-    if (this.config.findings.length === 0) {
+    if (this.findings.length === 0) {
       return;
     }
 
@@ -452,7 +681,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   }
 
   private moveActiveFinding(direction: -1 | 1): void {
-    const maxIndex = this.config.findings.length - 1;
+    const maxIndex = this.findings.length - 1;
     this.activeFindingIndex = Math.max(
       0,
       Math.min(maxIndex, this.activeFindingIndex + direction),
@@ -462,7 +691,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   }
 
   private toggleActiveFinding(): void {
-    const finding = this.config.findings[this.activeFindingIndex];
+    const finding = this.findings[this.activeFindingIndex];
     if (finding === undefined || finding.fixed) {
       return;
     }
@@ -472,10 +701,14 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       return;
     }
 
-    if (this.selectedFindingIds.has(findingId)) {
+    if (
+      this.selectedFindingIds.has(finding.selectionKey) ||
+      this.selectedFindingIds.has(findingId)
+    ) {
+      this.selectedFindingIds.delete(finding.selectionKey);
       this.selectedFindingIds.delete(findingId);
     } else {
-      this.selectedFindingIds.add(findingId);
+      this.selectedFindingIds.add(finding.selectionKey);
     }
 
     this.validationMessage = undefined;
@@ -483,20 +716,20 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   }
 
   private toggleAllOpenFindings(): void {
-    const openFindingIds = this.config.findings
+    const openFindingKeys = this.findings
       .filter((finding) => !finding.fixed)
-      .map((finding) => finding.id.trim())
+      .map((finding) => finding.selectionKey)
       .filter((findingId) => findingId.length > 0);
 
-    if (openFindingIds.length === 0) {
+    if (openFindingKeys.length === 0) {
       return;
     }
 
-    const allOpenSelected = openFindingIds.every((findingId) =>
+    const allOpenSelected = openFindingKeys.every((findingId) =>
       this.selectedFindingIds.has(findingId),
     );
 
-    for (const findingId of openFindingIds) {
+    for (const findingId of openFindingKeys) {
       if (allOpenSelected) {
         this.selectedFindingIds.delete(findingId);
       } else {
@@ -511,7 +744,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   private getVisibleFindingRange(): { start: number; end: number } {
     this.ensureActiveFindingVisible();
 
-    const totalCount = this.config.findings.length;
+    const totalCount = this.findings.length;
     const visibleCount = Math.min(this.getMaxVisibleFindings(), totalCount);
 
     return {
@@ -521,7 +754,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   }
 
   private ensureActiveFindingVisible(): void {
-    const totalCount = this.config.findings.length;
+    const totalCount = this.findings.length;
     if (totalCount === 0) {
       this.activeFindingIndex = 0;
       this.findingScrollOffset = 0;
@@ -617,7 +850,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   private submit(fixContext = this.contextEditor.getExpandedText()): void {
     const normalized = normalizeReviewFixWidgetSelection({
       reviewRunId: this.config.reviewRunId,
-      findings: this.config.findings,
+      findings: this.findings,
       selectedFindingIds: [...this.selectedFindingIds],
       fixContext,
     });
@@ -685,15 +918,5 @@ export function showReviewFixWidget(
   return ctx.ui.custom<ReviewFixWidgetResult>(
     (tui, theme, _keybindings, done) =>
       createReviewFixWidgetComponent({ tui, theme, config, done }),
-    {
-      overlay: true,
-      overlayOptions: {
-        width: "80%",
-        minWidth: 48,
-        maxHeight: "85%",
-        anchor: "center",
-        margin: 2,
-      },
-    },
   );
 }
