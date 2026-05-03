@@ -18,8 +18,9 @@ import {
   createWidgetEditorTheme,
   createWidgetRenderHelpers,
   handleSubmitCancelActionInput,
-  nextItem,
-  renderSubmitCancelAction,
+  handleWidgetFrameInput,
+  renderFieldHeader,
+  renderSubmitCancelActions,
 } from "./widget-utils.js";
 
 export type ReviewFixWidgetFindingInput = {
@@ -119,104 +120,208 @@ type NormalizedReviewFixFinding = ReviewFixWidgetFindingInput & {
   selectionKey: string;
 };
 
-export function normalizeReviewFixWidgetSelection(
-  input: ReviewFixWidgetSelectionInput,
-): NormalizedReviewFixWidgetSelection {
-  const normalizedFindings: NormalizedReviewFixFinding[] = [];
-  const findingByKey = new Map<string, NormalizedReviewFixFinding>();
-  const findingKeysById = new Map<string, string[]>();
+type ReviewFixFindingIndex = {
+  findings: NormalizedReviewFixFinding[];
+  findingByKey: Map<string, NormalizedReviewFixFinding>;
+  findingKeysById: Map<string, string[]>;
+};
 
-  for (const rawFinding of input.findings) {
-    const normalizedId = rawFinding.id.trim();
-    if (normalizedId.length === 0) {
+type ReviewFixSelectionError = Extract<
+  NormalizedReviewFixWidgetSelection,
+  { ok: false }
+>;
+
+type ReviewFixFindingIndexResult =
+  | { ok: true; index: ReviewFixFindingIndex }
+  | ReviewFixSelectionError;
+
+type SelectedFindingKeysResult =
+  | { ok: true; selectedKeys: Set<string> }
+  | ReviewFixSelectionError;
+
+type SelectedFindingReviewRunResult =
+  | { ok: true; reviewRunId?: string }
+  | ReviewFixSelectionError;
+
+function normalizeReviewFixFinding(
+  rawFinding: ReviewFixWidgetFindingInput,
+): NormalizedReviewFixFinding {
+  const normalizedId = rawFinding.id.trim();
+  const normalizedReviewRunId = rawFinding.reviewRunId?.trim() ?? "";
+  const selectionKey =
+    normalizedReviewRunId.length > 0
+      ? buildFindingSelectionKey(normalizedReviewRunId, normalizedId)
+      : normalizedId;
+
+  return {
+    ...rawFinding,
+    id: normalizedId,
+    reviewRunId: normalizedReviewRunId,
+    selectionKey,
+  };
+}
+
+function createReviewFixFindingIndex(): ReviewFixFindingIndex {
+  return {
+    findings: [],
+    findingByKey: new Map<string, NormalizedReviewFixFinding>(),
+    findingKeysById: new Map<string, string[]>(),
+  };
+}
+
+function addFindingToIndex(
+  index: ReviewFixFindingIndex,
+  finding: NormalizedReviewFixFinding,
+  options: { allowDuplicate?: boolean } = {},
+): boolean {
+  const isDuplicate = index.findingByKey.has(finding.selectionKey);
+  if (isDuplicate && options.allowDuplicate !== true) {
+    return false;
+  }
+
+  index.findings.push(finding);
+  if (isDuplicate) {
+    return true;
+  }
+
+  index.findingByKey.set(finding.selectionKey, finding);
+  const keys = index.findingKeysById.get(finding.id);
+  index.findingKeysById.set(
+    finding.id,
+    keys === undefined
+      ? [finding.selectionKey]
+      : [...keys, finding.selectionKey],
+  );
+  return true;
+}
+
+function buildDisplayFindingIndex(
+  findings: ReviewFixWidgetFindingInput[],
+): ReviewFixFindingIndex {
+  const index = createReviewFixFindingIndex();
+
+  for (const rawFinding of findings) {
+    const finding = normalizeReviewFixFinding(rawFinding);
+    if (finding.id.length === 0) {
+      continue;
+    }
+
+    addFindingToIndex(index, finding, { allowDuplicate: true });
+  }
+
+  return index;
+}
+
+function buildSelectionFindingIndex(
+  findings: ReviewFixWidgetFindingInput[],
+): ReviewFixFindingIndexResult {
+  const index = createReviewFixFindingIndex();
+
+  for (const rawFinding of findings) {
+    const finding = normalizeReviewFixFinding(rawFinding);
+    if (finding.id.length === 0) {
       return {
         ok: false,
         error: "Review-fix widget data has a blank finding id.",
       };
     }
 
-    const normalizedReviewRunId = rawFinding.reviewRunId?.trim() ?? "";
-    const selectionKey =
-      normalizedReviewRunId.length > 0
-        ? buildFindingSelectionKey(normalizedReviewRunId, normalizedId)
-        : normalizedId;
-
-    if (findingByKey.has(selectionKey)) {
+    if (!addFindingToIndex(index, finding)) {
       return {
         ok: false,
-        error: `Review-fix widget data has duplicate finding id: ${normalizedId}.`,
+        error: `Review-fix widget data has duplicate finding id: ${finding.id}.`,
       };
     }
-
-    const normalizedFinding: NormalizedReviewFixFinding = {
-      ...rawFinding,
-      id: normalizedId,
-      reviewRunId: normalizedReviewRunId,
-      selectionKey,
-    };
-
-    normalizedFindings.push(normalizedFinding);
-    findingByKey.set(selectionKey, normalizedFinding);
-    const keys = findingKeysById.get(normalizedId);
-    findingKeysById.set(
-      normalizedId,
-      keys === undefined ? [selectionKey] : [...keys, selectionKey],
-    );
   }
 
-  const selectableFindingCount = normalizedFindings.filter(
-    (finding) => !finding.fixed,
-  ).length;
-  if (selectableFindingCount === 0) {
-    return { ok: false, error: "No review findings are available to fix." };
-  }
+  return { ok: true, index };
+}
 
-  const normalizedReviewRunId = input.reviewRunId?.trim();
-
+function getInitialSelectedFindingKeys(
+  selectedFindingIds: string[] | undefined,
+  findingKeysById: Map<string, string[]>,
+): Set<string> {
   const selectedKeys = new Set<string>();
-  for (const selectedId of input.selectedFindingIds) {
+
+  for (const selectedId of selectedFindingIds ?? []) {
+    const normalizedSelectedId = selectedId.trim();
+    if (normalizedSelectedId.length === 0) {
+      continue;
+    }
+
+    const parsedSelectionKey = parseFindingSelectionKey(normalizedSelectedId);
+    if (parsedSelectionKey !== null) {
+      selectedKeys.add(
+        buildFindingSelectionKey(
+          parsedSelectionKey.reviewRunId,
+          parsedSelectionKey.id,
+        ),
+      );
+      continue;
+    }
+
+    for (const matchingKey of findingKeysById.get(normalizedSelectedId) ?? []) {
+      selectedKeys.add(matchingKey);
+    }
+  }
+
+  return selectedKeys;
+}
+
+function resolveSelectedFindingKeys(
+  selectedFindingIds: string[],
+  index: ReviewFixFindingIndex,
+): SelectedFindingKeysResult {
+  const selectedKeys = new Set<string>();
+
+  for (const selectedId of selectedFindingIds) {
     const trimmedSelectedId = selectedId.trim();
     if (trimmedSelectedId.length === 0) {
       continue;
     }
 
     const parsedSelectionKey = parseFindingSelectionKey(trimmedSelectedId);
-    if (parsedSelectionKey === null) {
-      const matchingKeys = findingKeysById.get(trimmedSelectedId) ?? [];
-      if (matchingKeys.length === 0) {
+    if (parsedSelectionKey !== null) {
+      const key = buildFindingSelectionKey(
+        parsedSelectionKey.reviewRunId,
+        parsedSelectionKey.id,
+      );
+      if (!index.findingByKey.has(key)) {
         return {
           ok: false,
           error: `Selected finding is no longer available: ${trimmedSelectedId}.`,
         };
       }
 
-      if (matchingKeys.length > 1) {
-        return {
-          ok: false,
-          error: "Selected findings must come from a single review run.",
-        };
-      }
-
-      selectedKeys.add(matchingKeys[0] ?? "");
+      selectedKeys.add(key);
       continue;
     }
 
-    const key = buildFindingSelectionKey(
-      parsedSelectionKey.reviewRunId,
-      parsedSelectionKey.id,
-    );
-    const selectedFinding = findingByKey.get(key);
-    if (selectedFinding === undefined) {
+    const matchingKeys = index.findingKeysById.get(trimmedSelectedId) ?? [];
+    if (matchingKeys.length === 0) {
       return {
         ok: false,
         error: `Selected finding is no longer available: ${trimmedSelectedId}.`,
       };
     }
 
-    selectedKeys.add(key);
+    if (matchingKeys.length > 1) {
+      return {
+        ok: false,
+        error: "Selected findings must come from a single review run.",
+      };
+    }
+
+    selectedKeys.add(matchingKeys[0] ?? "");
   }
 
-  const normalizedSelectedFindingIds: string[] = [];
+  return { ok: true, selectedKeys };
+}
+
+function validateSelectedFindingKeys(
+  selectedKeys: Set<string>,
+  findingByKey: Map<string, NormalizedReviewFixFinding>,
+): SelectedFindingReviewRunResult {
   const selectedFindingRunIds = new Set<string>();
 
   for (const selectedKey of selectedKeys) {
@@ -247,30 +352,69 @@ export function normalizeReviewFixWidgetSelection(
     };
   }
 
-  for (const finding of normalizedFindings) {
-    if (finding.fixed) {
-      continue;
-    }
-
-    if (
-      selectedKeys.has(finding.selectionKey) ||
-      selectedKeys.has(finding.id)
-    ) {
-      normalizedSelectedFindingIds.push(finding.id);
-    }
+  if (selectedFindingRunIds.size === 0) {
+    return { ok: true };
   }
 
+  const reviewRunId = selectedFindingRunIds.values().next().value;
+  return typeof reviewRunId === "string"
+    ? { ok: true, reviewRunId }
+    : { ok: true };
+}
+
+function collectSelectedFindingIds(
+  findings: NormalizedReviewFixFinding[],
+  selectedKeys: Set<string>,
+): string[] {
+  return findings
+    .filter(
+      (finding) =>
+        !finding.fixed &&
+        (selectedKeys.has(finding.selectionKey) ||
+          selectedKeys.has(finding.id)),
+    )
+    .map((finding) => finding.id);
+}
+
+export function normalizeReviewFixWidgetSelection(
+  input: ReviewFixWidgetSelectionInput,
+): NormalizedReviewFixWidgetSelection {
+  const indexResult = buildSelectionFindingIndex(input.findings);
+  if (!indexResult.ok) {
+    return indexResult;
+  }
+
+  const { index } = indexResult;
+  if (!index.findings.some((finding) => !finding.fixed)) {
+    return { ok: false, error: "No review findings are available to fix." };
+  }
+
+  const selectedKeyResult = resolveSelectedFindingKeys(
+    input.selectedFindingIds,
+    index,
+  );
+  if (!selectedKeyResult.ok) {
+    return selectedKeyResult;
+  }
+
+  const selectedFindingResult = validateSelectedFindingKeys(
+    selectedKeyResult.selectedKeys,
+    index.findingByKey,
+  );
+  if (!selectedFindingResult.ok) {
+    return selectedFindingResult;
+  }
+
+  const normalizedSelectedFindingIds = collectSelectedFindingIds(
+    index.findings,
+    selectedKeyResult.selectedKeys,
+  );
   if (normalizedSelectedFindingIds.length === 0) {
     return { ok: false, error: "Select at least one finding to fix." };
   }
 
-  const selectedFindingReviewRunId =
-    selectedFindingRunIds.size === 1
-      ? selectedFindingRunIds.values().next().value
-      : undefined;
-
   const normalizedSelectedReviewRunId =
-    selectedFindingReviewRunId ?? normalizedReviewRunId;
+    selectedFindingResult.reviewRunId ?? input.reviewRunId?.trim();
   if (
     normalizedSelectedReviewRunId === undefined ||
     normalizedSelectedReviewRunId.length === 0
@@ -356,56 +500,12 @@ class ReviewFixWidgetComponent implements Component, Focusable {
     this.contextEditor.onSubmit = (fixContext) => this.submit(fixContext);
     this.contextEditor.onChange = () => this.handleContextChange();
 
-    const findingKeysById = new Map<string, string[]>();
-    this.findings = config.findings
-      .map((finding) => {
-        const normalizedId = finding.id.trim();
-        const normalizedReviewRunId = finding.reviewRunId?.trim() ?? "";
-        const selectionKey =
-          normalizedReviewRunId.length > 0
-            ? buildFindingSelectionKey(normalizedReviewRunId, normalizedId)
-            : normalizedId;
-        const normalizedFinding: NormalizedReviewFixFinding = {
-          ...finding,
-          id: normalizedId,
-          reviewRunId: normalizedReviewRunId,
-          selectionKey,
-        };
-
-        const keys = findingKeysById.get(normalizedId);
-        findingKeysById.set(
-          normalizedId,
-          keys === undefined ? [selectionKey] : [...keys, selectionKey],
-        );
-
-        return normalizedFinding;
-      })
-      .filter((finding) => finding.id.length > 0);
-
-    const selectedFindingIds = new Set<string>();
-    for (const selectedId of config.initialSelectedFindingIds ?? []) {
-      const normalizedSelectedId = selectedId.trim();
-      if (normalizedSelectedId.length === 0) {
-        continue;
-      }
-
-      const parsedSelectionKey = parseFindingSelectionKey(normalizedSelectedId);
-      if (parsedSelectionKey !== null) {
-        selectedFindingIds.add(
-          buildFindingSelectionKey(
-            parsedSelectionKey.reviewRunId,
-            parsedSelectionKey.id,
-          ),
-        );
-        continue;
-      }
-
-      const matchingKeys = findingKeysById.get(normalizedSelectedId) ?? [];
-      for (const matchingKey of matchingKeys) {
-        selectedFindingIds.add(matchingKey);
-      }
-    }
-    this.selectedFindingIds = selectedFindingIds;
+    const findingIndex = buildDisplayFindingIndex(config.findings);
+    this.findings = findingIndex.findings;
+    this.selectedFindingIds = getInitialSelectedFindingKeys(
+      config.initialSelectedFindingIds,
+      findingIndex.findingKeysById,
+    );
 
     this.updateChildFocus();
   }
@@ -424,26 +524,16 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
-      this.cancel();
-      return;
-    }
-
-    if (matchesKey(data, Key.tab)) {
-      this.setActiveField(nextItem(ACTIVE_FIELDS, this.activeField, 1));
-      return;
-    }
-
-    if (matchesKey(data, Key.shift("tab"))) {
-      this.setActiveField(nextItem(ACTIVE_FIELDS, this.activeField, -1));
-      return;
-    }
-
     if (
-      matchesKey(data, Key.ctrl("s")) ||
-      matchesKey(data, Key.ctrl("enter"))
+      handleWidgetFrameInput({
+        data,
+        fields: ACTIVE_FIELDS,
+        activeField: this.activeField,
+        setActiveField: (field) => this.setActiveField(field),
+        submit: () => this.submit(),
+        cancel: () => this.cancel(),
+      })
     ) {
-      this.submit();
       return;
     }
 
@@ -792,32 +882,25 @@ class ReviewFixWidgetComponent implements Component, Focusable {
     field: Exclude<ActiveField, "actions">,
     label: string,
   ): void {
-    const marker =
-      this.activeField === field ? this.theme.fg("accent", "▶") : " ";
-    addLine(`${marker} ${label}`);
+    addLine(
+      renderFieldHeader({
+        theme: this.theme,
+        active: this.activeField === field,
+        label,
+      }),
+    );
   }
 
   private renderActions(addLine: WidgetLineAppender): void {
-    const marker =
-      this.activeField === "actions" ? this.theme.fg("accent", "▶") : " ";
-    const active = this.activeField === "actions";
-    const submit = renderSubmitCancelAction({
-      theme: this.theme,
-      action: "submit",
-      selectedAction: this.selectedAction,
-      active,
-      submitLabel: "Start fix",
-      cancelLabel: "Cancel",
-    });
-    const cancel = renderSubmitCancelAction({
-      theme: this.theme,
-      action: "cancel",
-      selectedAction: this.selectedAction,
-      active,
-      submitLabel: "Start fix",
-      cancelLabel: "Cancel",
-    });
-    addLine(`${marker} ${submit}  ${cancel}`);
+    addLine(
+      renderSubmitCancelActions({
+        theme: this.theme,
+        active: this.activeField === "actions",
+        selectedAction: this.selectedAction,
+        submitLabel: "Start fix",
+        cancelLabel: "Cancel",
+      }),
+    );
   }
 
   private handleActionInput(data: string): void {

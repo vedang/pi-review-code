@@ -80,6 +80,16 @@ export function createWidgetRenderHelpers(width: number): WidgetRenderHelpers {
   };
 }
 
+export function renderFieldHeader(input: {
+  theme: Theme;
+  active: boolean;
+  label: string;
+  suffix?: string;
+}): string {
+  const marker = input.active ? input.theme.fg("accent", "▶") : " ";
+  return `${marker} ${input.label}${input.suffix ?? ""}`;
+}
+
 export function renderSubmitCancelAction(input: {
   theme: Theme;
   action: SubmitCancelAction;
@@ -98,6 +108,63 @@ export function renderSubmitCancelAction(input: {
 
   const color = input.action === "submit" ? "success" : "muted";
   return input.theme.fg(color, text);
+}
+
+export function renderSubmitCancelActions(input: {
+  theme: Theme;
+  active: boolean;
+  selectedAction: SubmitCancelAction;
+  submitLabel: string;
+  cancelLabel: string;
+}): string {
+  const marker = input.active ? input.theme.fg("accent", "▶") : " ";
+  const submit = renderSubmitCancelAction({
+    ...input,
+    action: "submit",
+  });
+  const cancel = renderSubmitCancelAction({
+    ...input,
+    action: "cancel",
+  });
+
+  return `${marker} ${submit}  ${cancel}`;
+}
+
+export function handleWidgetFrameInput<TField>(input: {
+  data: string;
+  fields: readonly TField[];
+  activeField: TField;
+  setActiveField: (field: TField) => void;
+  submit: () => void;
+  cancel: () => void;
+}): boolean {
+  if (
+    matchesKey(input.data, Key.escape) ||
+    matchesKey(input.data, Key.ctrl("c"))
+  ) {
+    input.cancel();
+    return true;
+  }
+
+  if (matchesKey(input.data, Key.tab)) {
+    input.setActiveField(nextItem(input.fields, input.activeField, 1));
+    return true;
+  }
+
+  if (matchesKey(input.data, Key.shift("tab"))) {
+    input.setActiveField(nextItem(input.fields, input.activeField, -1));
+    return true;
+  }
+
+  if (
+    matchesKey(input.data, Key.ctrl("s")) ||
+    matchesKey(input.data, Key.ctrl("enter"))
+  ) {
+    input.submit();
+    return true;
+  }
+
+  return false;
 }
 
 export function handleSubmitCancelActionInput(input: {

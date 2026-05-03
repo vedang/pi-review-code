@@ -245,6 +245,31 @@ test("selection rejects findings from multiple review runs", () => {
   );
 });
 
+test("duplicate finding data stays visible and fails submit validation", () => {
+  const { component, results } = createComponent({
+    ...baseConfig,
+    findings: [finding({ id: "duplicate" }), finding({ id: "duplicate" })],
+    initialSelectedFindingIds: ["duplicate"],
+    initialFixContext: undefined,
+  });
+
+  const renderedText = component.render(80).join("\n");
+  assert.equal(renderedText.match(/P1 duplicate/g)?.length, 2);
+
+  component.handleInput?.("\x13");
+
+  assert.deepEqual(results, []);
+  assert.ok(
+    component
+      .render(80)
+      .some((line) =>
+        line.includes(
+          "Review-fix widget data has duplicate finding id: duplicate.",
+        ),
+      ),
+  );
+});
+
 test("a selects and clears all open findings", () => {
   const { component, results } = createComponent({
     ...baseConfig,

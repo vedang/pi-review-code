@@ -17,8 +17,9 @@ import {
   createWidgetEditorTheme,
   createWidgetRenderHelpers,
   handleSubmitCancelActionInput,
-  nextItem,
-  renderSubmitCancelAction,
+  handleWidgetFrameInput,
+  renderFieldHeader,
+  renderSubmitCancelActions,
 } from "./widget-utils.js";
 
 export type ReviewInputKind = "review" | "diff-against" | "pr";
@@ -122,26 +123,16 @@ class ReviewInputWidgetComponent implements Component, Focusable {
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
-      this.cancel();
-      return;
-    }
-
-    if (matchesKey(data, Key.tab)) {
-      this.setActiveField(nextItem(ACTIVE_FIELDS, this.activeField, 1));
-      return;
-    }
-
-    if (matchesKey(data, Key.shift("tab"))) {
-      this.setActiveField(nextItem(ACTIVE_FIELDS, this.activeField, -1));
-      return;
-    }
-
     if (
-      matchesKey(data, Key.ctrl("s")) ||
-      matchesKey(data, Key.ctrl("enter"))
+      handleWidgetFrameInput({
+        data,
+        fields: ACTIVE_FIELDS,
+        activeField: this.activeField,
+        setActiveField: (field) => this.setActiveField(field),
+        submit: () => this.submit(),
+        cancel: () => this.cancel(),
+      })
     ) {
-      this.submit();
       return;
     }
 
@@ -220,34 +211,27 @@ class ReviewInputWidgetComponent implements Component, Focusable {
     field: Exclude<ActiveField, "actions">,
     label: string,
   ): void {
-    const isActive = this.activeField === field;
-    const marker = isActive ? this.theme.fg("accent", "▶") : " ";
-    const requiredText =
-      field === "primary" ? this.theme.fg("warning", " required") : "";
-    addLine(`${marker} ${label}${requiredText}`);
+    addLine(
+      renderFieldHeader({
+        theme: this.theme,
+        active: this.activeField === field,
+        label,
+        suffix:
+          field === "primary" ? this.theme.fg("warning", " required") : "",
+      }),
+    );
   }
 
   private renderActions(addLine: WidgetLineAppender): void {
-    const marker =
-      this.activeField === "actions" ? this.theme.fg("accent", "▶") : " ";
-    const active = this.activeField === "actions";
-    const submit = renderSubmitCancelAction({
-      theme: this.theme,
-      action: "submit",
-      selectedAction: this.selectedAction,
-      active,
-      submitLabel: "Submit",
-      cancelLabel: "Cancel",
-    });
-    const cancel = renderSubmitCancelAction({
-      theme: this.theme,
-      action: "cancel",
-      selectedAction: this.selectedAction,
-      active,
-      submitLabel: "Submit",
-      cancelLabel: "Cancel",
-    });
-    addLine(`${marker} ${submit}  ${cancel}`);
+    addLine(
+      renderSubmitCancelActions({
+        theme: this.theme,
+        active: this.activeField === "actions",
+        selectedAction: this.selectedAction,
+        submitLabel: "Submit",
+        cancelLabel: "Cancel",
+      }),
+    );
   }
 
   private setActiveField(field: ActiveField): void {
