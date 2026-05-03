@@ -707,25 +707,14 @@ class ReviewFixWidgetComponent implements Component, Focusable {
             Math.max(0, this.activeFindingDetailScrollOffset),
           );
 
-          const visibleDetailLineCount = Math.min(
-            maxDetailLines,
-            detailLines.length,
-          );
           const detailStart = this.activeFindingDetailScrollOffset;
           const detailEnd = Math.min(
             detailLines.length,
-            detailStart + visibleDetailLineCount,
+            detailStart + maxDetailLines,
           );
 
-          for (
-            let detailIndex = detailStart;
-            detailIndex < detailEnd;
-            detailIndex += 1
-          ) {
-            const detailLine = detailLines[detailIndex];
-            if (detailLine !== undefined) {
-              addLine(detailLine);
-            }
+          for (const detailLine of detailLines.slice(detailStart, detailEnd)) {
+            addLine(detailLine);
           }
 
           if (detailLines.length > maxDetailLines) {
