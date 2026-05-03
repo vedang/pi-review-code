@@ -42,7 +42,7 @@ Typed arguments prefill the target field. PR/MR URLs and number-only selectors a
 
 Select unfixed findings from completed reviews, optionally add fix context, then start a same-session fix branch.
 
-The fix prompt lists selected comments with priorities, references, and optional fix context. The fix branch collapses back with a summary.
+The active finding shows its full wrapped text in the widget; use Up/Down to focus each finding and `[`/`]` or PageUp/PageDown to scroll long details. The fix prompt lists selected comments with priorities, references, and optional fix context. The fix branch collapses back with a summary.
 
 ## Review lifecycle
 

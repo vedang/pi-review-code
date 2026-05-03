@@ -494,6 +494,26 @@ test("review-fix opens empty widget when no completed review findings exist", as
   ]);
 });
 
+test("review-fix passes multiline stored review comments to widget unchanged", async () => {
+  const multilineComment =
+    "Token refresh can race with logout.\nBecause logout clears the active session before refresh settles.\nFix: serialize refresh and clear pending promises.";
+  const harness = createHarness({
+    entries: [
+      reviewSummaryEntry("review-1", [
+        comment({ id: "multiline", comment: multilineComment }),
+      ]),
+    ],
+    fixWidgetResult: { submitted: false },
+  });
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.equal(
+    harness.fixWidgetConfigs[0]?.findings[0]?.comment,
+    multilineComment,
+  );
+});
+
 test("review-fix widget displays all open review findings newest first", async () => {
   const harness = createHarness({
     entries: [

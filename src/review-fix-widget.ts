@@ -9,12 +9,15 @@ import {
   Key,
   type TUI,
   matchesKey,
+  visibleWidth,
+  wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 
 import type { AddReviewCommentReference, ReviewComment } from "./types.js";
 import {
   type SubmitCancelAction,
   type WidgetLineAppender,
+  type WidgetRenderHelpers,
   createWidgetEditorTheme,
   createWidgetRenderHelpers,
   handleSubmitCancelActionInput,
@@ -86,7 +89,7 @@ const ACTIVE_FIELDS: ActiveField[] = ["findings", "context", "actions"];
 const REVIEW_FIX_CONTEXT_LABEL =
   "additional context for the fix loop (optional)";
 const REVIEW_FIX_KEY_HINT =
-  "Up/Down move • Space toggle • a select all open • Tab/Shift+Tab switch area • Enter/Ctrl+S submit • Alt+Enter newline • Esc cancel";
+  "Up/Down move • Space toggle • active finding shows full text • [/] scroll detail • a select all open • Tab/Shift+Tab switch area • Enter/Ctrl+S submit • Alt+Enter newline • Esc cancel";
 const FINDING_SELECTION_KEY_SEPARATOR = "\u001f";
 
 function buildFindingSelectionKey(
@@ -482,6 +485,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   private activeField: ActiveField = "findings";
   private activeFindingIndex = 0;
   private findingScrollOffset = 0;
+  private activeFindingDetailScrollOffset = 0;
   private selectedAction: SubmitCancelAction = "submit";
   private validationMessage: string | undefined;
   private isDone = false;
@@ -567,7 +571,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
     this.renderMetadata(render.addLine);
     render.addLine();
 
-    this.renderFindings(render.addLine);
+    this.renderFindings(render);
     render.addLine();
 
     this.renderFieldHeader(render.addLine, "context", REVIEW_FIX_CONTEXT_LABEL);
@@ -624,7 +628,8 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       ),
     );
   }
-  private renderFindings(addLine: WidgetLineAppender): void {
+  private renderFindings(render: WidgetRenderHelpers): void {
+    const { addLine } = render;
     this.renderFieldHeader(addLine, "findings", "findings");
 
     if (this.findings.length === 0) {
@@ -654,6 +659,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       );
     }
 
+    const maxDetailLines = this.getMaxActiveFindingDetailLines();
     let previousReviewRunId: string | undefined;
     for (let index = visibleRange.start; index < visibleRange.end; index += 1) {
       const finding = this.findings[index];
@@ -680,12 +686,97 @@ class ReviewFixWidgetComponent implements Component, Focusable {
         index === this.activeFindingIndex ? this.theme.fg("accent", "›") : " ";
       const checkbox = this.renderCheckbox(finding);
       const refs = formatReferences(finding.references);
-      const preview = firstCommentLine(finding.comment);
-      const row = `${activeMarker} ${checkbox} ${finding.priority} ${finding.id.trim()} ${refs} ${preview}`;
+      const preview =
+        index === this.activeFindingIndex
+          ? ""
+          : firstCommentLine(finding.comment);
+      const row =
+        `${activeMarker} ${checkbox} ${finding.priority} ${finding.id.trim()} ${refs} ${preview}`.trimEnd();
       addLine(`  ${row}`);
+
+      if (index === this.activeFindingIndex) {
+        const detailLines = this.getWrappedFindingDetailLines(
+          finding,
+          render.safeWidth,
+        );
+
+        if (detailLines.length > 0) {
+          const maxOffset = Math.max(0, detailLines.length - maxDetailLines);
+          this.activeFindingDetailScrollOffset = Math.min(
+            maxOffset,
+            Math.max(0, this.activeFindingDetailScrollOffset),
+          );
+
+          const visibleDetailLineCount = Math.min(
+            maxDetailLines,
+            detailLines.length,
+          );
+          const detailStart = this.activeFindingDetailScrollOffset;
+          const detailEnd = Math.min(
+            detailLines.length,
+            detailStart + visibleDetailLineCount,
+          );
+
+          for (
+            let detailIndex = detailStart;
+            detailIndex < detailEnd;
+            detailIndex += 1
+          ) {
+            const detailLine = detailLines[detailIndex];
+            if (detailLine !== undefined) {
+              addLine(detailLine);
+            }
+          }
+
+          if (detailLines.length > maxDetailLines) {
+            addLine(
+              this.theme.fg(
+                "dim",
+                `  finding detail ${detailStart + 1}-${detailEnd} of ${detailLines.length}`,
+              ),
+            );
+            addLine(
+              this.theme.fg("dim", "  [/] scroll detail (PageUp/PageDown)"),
+            );
+          }
+        }
+      }
+
       previousReviewRunId = currentReviewRunId;
     }
   }
+
+  private getWrappedFindingDetailLines(
+    finding: NormalizedReviewFixFinding,
+    safeWidth: number,
+  ): string[] {
+    const detailPrefix = "    ";
+    const bodyWidth = Math.max(1, safeWidth - visibleWidth(detailPrefix));
+    const commentText = finding.comment.trim();
+    if (commentText.length === 0) {
+      return [];
+    }
+
+    const lines: string[] = [];
+    for (const rawLine of commentText.split(/\r?\n/)) {
+      const wrappedLines = wrapTextWithAnsi(rawLine, bodyWidth);
+      if (wrappedLines.length === 0) {
+        lines.push(detailPrefix);
+        continue;
+      }
+
+      for (const wrappedLine of wrappedLines) {
+        lines.push(`${detailPrefix}${wrappedLine}`);
+      }
+    }
+
+    return lines;
+  }
+
+  private getMaxActiveFindingDetailLines(): number {
+    return Math.max(1, this.getMaxVisibleFindings() - 1);
+  }
+
   private renderCheckbox(finding: NormalizedReviewFixFinding): string {
     if (finding.fixed) {
       return this.theme.fg("muted", "[−] fixed");
@@ -750,6 +841,24 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       return;
     }
 
+    if (
+      matchesKey(data, Key.leftbracket) ||
+      data === "[" ||
+      matchesKey(data, Key.pageUp)
+    ) {
+      this.scrollActiveFindingDetail(-1);
+      return;
+    }
+
+    if (
+      matchesKey(data, Key.rightbracket) ||
+      data === "]" ||
+      matchesKey(data, Key.pageDown)
+    ) {
+      this.scrollActiveFindingDetail(1);
+      return;
+    }
+
     if (matchesKey(data, Key.up)) {
       this.moveActiveFinding(-1);
       return;
@@ -772,11 +881,31 @@ class ReviewFixWidgetComponent implements Component, Focusable {
 
   private moveActiveFinding(direction: -1 | 1): void {
     const maxIndex = this.findings.length - 1;
+    const previousFindingIndex = this.activeFindingIndex;
     this.activeFindingIndex = Math.max(
       0,
       Math.min(maxIndex, this.activeFindingIndex + direction),
     );
+
+    if (this.activeFindingIndex !== previousFindingIndex) {
+      this.activeFindingDetailScrollOffset = 0;
+    }
+
     this.ensureActiveFindingVisible();
+    this.requestRender();
+  }
+
+  private scrollActiveFindingDetail(direction: -1 | 1): void {
+    const finding = this.findings[this.activeFindingIndex];
+    if (finding === undefined) {
+      return;
+    }
+
+    const pageSize = this.getMaxActiveFindingDetailLines();
+    this.activeFindingDetailScrollOffset = Math.max(
+      0,
+      this.activeFindingDetailScrollOffset + direction * pageSize,
+    );
     this.requestRender();
   }
 
@@ -848,6 +977,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
     if (totalCount === 0) {
       this.activeFindingIndex = 0;
       this.findingScrollOffset = 0;
+      this.activeFindingDetailScrollOffset = 0;
       return;
     }
 

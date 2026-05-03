@@ -42,9 +42,9 @@ const baseConfig: ReviewFixWidgetConfig = {
   initialFixContext: "Keep public API stable.",
 };
 
-function createFakeTui(): TUI {
+function createFakeTui(rows = 40): TUI {
   return {
-    terminal: { rows: 40 },
+    terminal: { rows },
     requestRender: () => {},
   } as unknown as TUI;
 }
@@ -58,10 +58,13 @@ function createFakeTheme(): Theme {
   } as unknown as Theme;
 }
 
-function createComponent(config: ReviewFixWidgetConfig = baseConfig) {
+function createComponent(
+  config: ReviewFixWidgetConfig = baseConfig,
+  options: { rows?: number } = {},
+) {
   const results: ReviewFixWidgetResult[] = [];
   const component = createReviewFixWidgetComponent({
-    tui: createFakeTui(),
+    tui: createFakeTui(options.rows),
     theme: createFakeTheme(),
     config,
     done: (result) => {
@@ -144,6 +147,99 @@ test("review fix widget groups findings from multiple review runs", () => {
   assert.ok(text.includes("[ ] P1 old"));
 });
 
+test("active finding renders full multiline comment details when it fits", () => {
+  const { component } = createComponent({
+    ...baseConfig,
+    findings: [
+      finding({
+        id: "finding-a",
+        comment:
+          "Token refresh can race with logout.\nBecause logout clears the active session before refresh settles.\nFix: serialize refresh and clear pending promises.",
+      }),
+      finding({
+        id: "finding-b",
+        comment:
+          "Cache retries hide failures.\nThis non-active detail should stay collapsed.",
+      }),
+    ],
+    initialSelectedFindingIds: ["finding-a"],
+  });
+
+  const text = component.render(88).join("\n");
+
+  assert.ok(text.includes("Because logout clears the active session"));
+  assert.ok(
+    text.includes("Fix: serialize refresh and clear pending promises."),
+  );
+  assert.ok(!text.includes("This non-active detail should stay collapsed."));
+});
+
+test("active finding detail scrolls on small terminals and keeps actions visible", () => {
+  const commentLines = Array.from(
+    { length: 8 },
+    (_value, index) => `detail line ${index + 1}`,
+  ).join("\n");
+  const { component } = createComponent(
+    {
+      ...baseConfig,
+      findings: [finding({ id: "finding-a", comment: commentLines })],
+      initialSelectedFindingIds: ["finding-a"],
+      initialFixContext: undefined,
+    },
+    { rows: 18 },
+  );
+
+  let text = component.render(72).join("\n");
+  assert.ok(text.includes("finding detail 1-2 of 8"));
+  assert.ok(text.includes("detail line 1"));
+  assert.ok(!text.includes("detail line 5"));
+  assert.ok(text.includes("Start fix"));
+  assert.ok(text.includes("[/] scroll detail"));
+
+  component.handleInput?.("]");
+
+  text = component.render(72).join("\n");
+  assert.ok(text.includes("finding detail 3-4 of 8"));
+  assert.ok(text.includes("detail line 3"));
+  assert.ok(!text.includes("detail line 1"));
+  assert.ok(text.includes("Start fix"));
+});
+
+test("moving active finding resets detail scroll for the new finding", () => {
+  const firstComment = Array.from(
+    { length: 6 },
+    (_value, index) => `first detail ${index + 1}`,
+  ).join("\n");
+  const secondComment = Array.from(
+    { length: 6 },
+    (_value, index) => `second detail ${index + 1}`,
+  ).join("\n");
+  const { component } = createComponent(
+    {
+      ...baseConfig,
+      findings: [
+        finding({ id: "finding-a", comment: firstComment }),
+        finding({ id: "finding-b", comment: secondComment }),
+      ],
+      initialSelectedFindingIds: [],
+      initialFixContext: undefined,
+    },
+    { rows: 18 },
+  );
+
+  component.handleInput?.("]");
+  assert.ok(
+    component.render(72).join("\n").includes("finding detail 3-4 of 6"),
+  );
+
+  component.handleInput?.("\x1b[B");
+
+  const text = component.render(72).join("\n");
+  assert.ok(text.includes("finding detail 1-2 of 6"));
+  assert.ok(text.includes("second detail 1"));
+  assert.ok(!text.includes("second detail 3"));
+});
+
 test("Space and Enter toggle open findings and submit in displayed order", () => {
   const { component, results } = createComponent({
     ...baseConfig,
@@ -170,12 +266,24 @@ test("fixed findings stay disabled when focused and cannot be toggled", () => {
   const { component, results } = createComponent({
     ...baseConfig,
     findings: [
-      finding({ id: "finding-a", fixed: true }),
+      finding({
+        id: "finding-a",
+        fixed: true,
+        comment:
+          "Fixed finding summary.\nFixed finding detail remains readable while focused.",
+      }),
       finding({ id: "finding-b" }),
     ],
     initialSelectedFindingIds: [],
     initialFixContext: undefined,
   });
+
+  assert.ok(
+    component
+      .render(80)
+      .join("\n")
+      .includes("Fixed finding detail remains readable while focused."),
+  );
 
   component.handleInput?.(" ");
   component.handleInput?.("\x1b[B");
