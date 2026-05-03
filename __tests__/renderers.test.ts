@@ -167,6 +167,8 @@ test("review summary renderer shows findings compactly", () => {
   assert.match(expanded ?? "", /Review findings review-1/);
   assert.match(expanded ?? "", /Second line only when expanded/);
   assert.doesNotMatch(expanded ?? "", /expand for full finding text/);
+  assert.doesNotMatch(expanded ?? "", /Prompt:/);
+  assert.doesNotMatch(expanded ?? "", /Review prompt/);
 });
 
 test("review-fix summary renderer includes source review and agent summary", () => {

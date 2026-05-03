@@ -232,10 +232,6 @@ export function renderReviewSummaryMessage(
     ...formatComments(details.comments, expanded, theme),
   ];
 
-  if (expanded) {
-    lines.push("", theme.fg("dim", "Prompt:"), details.reviewPrompt);
-  }
-
   return renderMessageBox(lines.join("\n"), theme);
 }
 

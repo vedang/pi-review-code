@@ -64,7 +64,7 @@ The extension registers compact custom renderers for:
 - review summaries
 - review-fix summaries
 
-Collapsed views show target, run id, and first findings; expanded views show full prompts or agent summaries.
+Collapsed views show target, run id, and first findings. Prompt messages expand to prompt text; review summaries expand to full finding text; fix summaries expand to agent summaries.
 
 ## Finding priorities
 
