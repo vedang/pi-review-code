@@ -71,33 +71,47 @@ const REVIEW_WIDGET_CONTEXT_LABEL = "any context I should be aware of?";
 const REVIEW_INPUT_KEY_HINT =
   "Tab/Shift+Tab switch field • arrows or 1/2/3 choose type • Enter submit/move from type • Alt+Enter newline • Esc cancel";
 
-const REVIEW_INPUT_KIND_OPTIONS: readonly ReviewInputKindOption[] = [
-  {
+const REVIEW_INPUT_KIND_VALUES = [
+  "review",
+  "diff-against",
+  "pr",
+] as const satisfies readonly ReviewInputKind[];
+
+const REVIEW_INPUT_KIND_OPTION_BY_KIND: Record<
+  ReviewInputKind,
+  ReviewInputKindOption
+> = {
+  review: {
     kind: "review",
     shortcut: "1",
     label: "Free-form request",
     primaryLabel: DEFAULT_PRIMARY_LABEL,
     primaryPlaceholder: "Describe the code, behavior, or risk to review.",
   },
-  {
+  "diff-against": {
     kind: "diff-against",
     shortcut: "2",
     label: "Diff against ref",
     primaryLabel: "ref:",
     primaryPlaceholder: "Enter ref or change id.",
   },
-  {
+  pr: {
     kind: "pr",
     shortcut: "3",
     label: "PR/MR URL or number",
     primaryLabel: "pr:",
     primaryPlaceholder: "Enter GitHub URL, GitLab URL, MR URL, or PR number.",
   },
-];
+};
 
-const REVIEW_INPUT_KIND_VALUES = REVIEW_INPUT_KIND_OPTIONS.map(
-  (option) => option.kind,
+const REVIEW_INPUT_KIND_OPTIONS = REVIEW_INPUT_KIND_VALUES.map(
+  (kind) => REVIEW_INPUT_KIND_OPTION_BY_KIND[kind],
 );
+
+const REVIEW_INPUT_KIND_BY_SHORTCUT: Partial<Record<string, ReviewInputKind>> =
+  Object.fromEntries(
+    REVIEW_INPUT_KIND_OPTIONS.map((option) => [option.shortcut, option.kind]),
+  );
 
 export function normalizeReviewInput(
   primaryValue: string,
@@ -121,36 +135,12 @@ export function normalizeReviewInput(
   };
 }
 
-function isReviewInputKind(value: unknown): value is ReviewInputKind {
-  return (
-    typeof value === "string" &&
-    (REVIEW_INPUT_KIND_VALUES as readonly string[]).includes(value)
-  );
-}
-
-function getInitialKind(config: ReviewInputWidgetConfig): ReviewInputKind {
-  if (config.initialKind !== undefined) {
-    return config.initialKind;
-  }
-
-  const legacyKind = (config as { kind?: unknown }).kind;
-  if (isReviewInputKind(legacyKind)) {
-    return legacyKind;
-  }
-
-  return "review";
-}
-
 function getKindOption(kind: ReviewInputKind): ReviewInputKindOption {
-  return (
-    REVIEW_INPUT_KIND_OPTIONS.find((option) => option.kind === kind) ??
-    REVIEW_INPUT_KIND_OPTIONS[0]
-  );
+  return REVIEW_INPUT_KIND_OPTION_BY_KIND[kind];
 }
 
 function getKindByShortcut(data: string): ReviewInputKind | undefined {
-  return REVIEW_INPUT_KIND_OPTIONS.find((option) => option.shortcut === data)
-    ?.kind;
+  return REVIEW_INPUT_KIND_BY_SHORTCUT[data];
 }
 
 class ReviewInputWidgetComponent implements Component, Focusable {
@@ -170,7 +160,7 @@ class ReviewInputWidgetComponent implements Component, Focusable {
     private readonly done: (result: ReviewInputWidgetResult) => void,
   ) {
     const editorTheme = createWidgetEditorTheme(theme);
-    this.selectedKind = getInitialKind(config);
+    this.selectedKind = config.initialKind ?? "review";
     this.primaryEditor = new Editor(tui, editorTheme, { paddingX: 1 });
     this.contextEditor = new Editor(tui, editorTheme, { paddingX: 1 });
     this.primaryEditor.setText(config.initialPrimaryValue ?? "");

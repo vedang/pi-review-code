@@ -148,12 +148,9 @@ export type ReviewSessionBeforeTreeResult = {
 type ReviewInputWidgetKind = "review" | "diff-against" | "pr";
 
 type ReviewInputWidgetConfig = {
-  kind: ReviewInputWidgetKind;
   title: string;
   helpText: string;
-  primaryLabel: string;
-  primaryPlaceholder: string;
-  contextLabel: string;
+  initialKind?: ReviewInputWidgetKind;
   initialPrimaryValue?: string;
   initialContext?: string;
 };
@@ -179,18 +176,6 @@ type ShowFixWidget = (
 ) => Promise<ReviewFixWidgetResult>;
 
 const REVIEW_WIDGET_HELP_TEXT = "Usage:\n  /review <review request>";
-const REVIEW_WIDGET_PRIMARY_LABEL = "what do I review?";
-const REVIEW_WIDGET_PRIMARY_PLACEHOLDER =
-  "Describe the code, behavior, or risk to review.";
-const REVIEW_WIDGET_CONTEXT_LABEL = "any context I should be aware of?";
-
-const REVIEW_DIFF_AGAINST_WIDGET_PRIMARY_LABEL = "ref:";
-const REVIEW_DIFF_AGAINST_WIDGET_PRIMARY_PLACEHOLDER =
-  "Enter ref or change id.";
-const REVIEW_PR_WIDGET_PRIMARY_LABEL = "pr:";
-const REVIEW_PR_WIDGET_PRIMARY_PLACEHOLDER =
-  "Enter GitHub URL, GitLab URL, or PR number.";
-
 const REVIEW_WIDGET_CANCELLED_MESSAGE = "Review cancelled.";
 const REVIEW_FIX_WIDGET_CANCELLED_MESSAGE = "Review-fix cancelled.";
 const REVIEW_NO_ACTIVE_MODEL_ERROR =
@@ -210,27 +195,18 @@ const REVIEW_FIX_REVALIDATE_ERROR =
   "Cannot start review-fix: selected findings are no longer available.";
 
 const REVIEW_DIFF_AGAINST_WIDGET = {
-  kind: "diff-against" as const,
+  initialKind: "diff-against" as const,
   helpText: REVIEW_DIFF_AGAINST_USAGE,
-  primaryLabel: REVIEW_DIFF_AGAINST_WIDGET_PRIMARY_LABEL,
-  primaryPlaceholder: REVIEW_DIFF_AGAINST_WIDGET_PRIMARY_PLACEHOLDER,
-  contextLabel: REVIEW_WIDGET_CONTEXT_LABEL,
 };
 
 const REVIEW_PR_WIDGET = {
-  kind: "pr" as const,
+  initialKind: "pr" as const,
   helpText: REVIEW_PR_USAGE,
-  primaryLabel: REVIEW_PR_WIDGET_PRIMARY_LABEL,
-  primaryPlaceholder: REVIEW_PR_WIDGET_PRIMARY_PLACEHOLDER,
-  contextLabel: REVIEW_WIDGET_CONTEXT_LABEL,
 };
 
 const REVIEW_WIDGET_BASE = {
-  kind: "review" as const,
+  initialKind: "review" as const,
   helpText: REVIEW_WIDGET_HELP_TEXT,
-  primaryLabel: REVIEW_WIDGET_PRIMARY_LABEL,
-  primaryPlaceholder: REVIEW_WIDGET_PRIMARY_PLACEHOLDER,
-  contextLabel: REVIEW_WIDGET_CONTEXT_LABEL,
 };
 
 const REVIEW_COMMENT_PRIORITY_SET = new Set<ReviewComment["priority"]>(
@@ -1028,11 +1004,8 @@ export function createReviewFlowController(
   type ReviewCommandParser = (args: string) => { target: ReviewTarget };
   type ReviewWidgetSpec = {
     template: {
-      kind: ReviewInputWidgetKind;
+      initialKind: ReviewInputWidgetKind;
       helpText: string;
-      primaryLabel: string;
-      primaryPlaceholder: string;
-      contextLabel: string;
     };
     extractInitialPrimaryValue: (command: { target: ReviewTarget }) => string;
     buildTargetFromInput: (input: {

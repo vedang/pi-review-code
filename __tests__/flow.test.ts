@@ -40,12 +40,9 @@ type InputWidgetResult =
   | { submitted: false };
 
 type InputWidgetCall = {
-  kind: string;
   title: string;
   helpText: string;
-  primaryLabel: string;
-  primaryPlaceholder: string;
-  contextLabel: string;
+  initialKind?: string;
   initialPrimaryValue?: string;
   initialContext?: string;
 };
@@ -269,12 +266,9 @@ test("review flow prompts for target and context before launching", async () => 
 
   assert.equal(harness.inputWidgetCalls.length, 1);
   assert.deepEqual(harness.inputWidgetCalls[0], {
-    kind: "review",
     title: "Start review",
     helpText: "Usage:\n  /review <review request>",
-    primaryLabel: "what do I review?",
-    primaryPlaceholder: "Describe the code, behavior, or risk to review.",
-    contextLabel: "any context I should be aware of?",
+    initialKind: "review",
   });
   assert.deepEqual(harness.resolvedTargets, [
     {
@@ -329,7 +323,7 @@ test("review flow prompts selector commands with target context", async () => {
     diffHarness.ctx,
   );
 
-  assert.equal(diffHarness.inputWidgetCalls[0]?.kind, "diff-against");
+  assert.equal(diffHarness.inputWidgetCalls[0]?.initialKind, "diff-against");
   assert.equal(
     diffHarness.inputWidgetCalls[0]?.initialPrimaryValue,
     "origin/main",
@@ -354,7 +348,7 @@ test("review flow prompts selector commands with target context", async () => {
 
   await prHarness.controller.handleReviewPrCommand("123", prHarness.ctx);
 
-  assert.equal(prHarness.inputWidgetCalls[0]?.kind, "pr");
+  assert.equal(prHarness.inputWidgetCalls[0]?.initialKind, "pr");
   assert.equal(prHarness.inputWidgetCalls[0]?.initialPrimaryValue, "123");
   assert.deepEqual(prHarness.resolvedTargets, [
     {
