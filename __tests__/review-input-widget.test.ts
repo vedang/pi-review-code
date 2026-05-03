@@ -14,12 +14,8 @@ import {
 } from "../src/review-input-widget.js";
 
 const baseConfig: ReviewInputWidgetConfig = {
-  kind: "review",
   title: "Start review",
   helpText: "Usage:\n  /review <review request>",
-  primaryLabel: "what do I review?",
-  primaryPlaceholder: "Describe code to review.",
-  contextLabel: "any context I should be aware of?",
 };
 
 function createFakeTui(): TUI {
@@ -52,6 +48,12 @@ function createComponent(config: ReviewInputWidgetConfig) {
   return { component, results };
 }
 
+function renderText(
+  component: ReturnType<typeof createComponent>["component"],
+) {
+  return component.render(72).join("\n");
+}
+
 test("normalizeReviewInput trims values and omits blank context", () => {
   assert.deepEqual(normalizeReviewInput("  auth flow  ", "  "), {
     ok: true,
@@ -72,69 +74,99 @@ test("normalizeReviewInput rejects blank primary value", () => {
   });
 });
 
-test("review input widget renders help, labels, and bounded lines", () => {
+test("review input widget renders selector, default mode, labels, and bounded lines", () => {
   const { component } = createComponent(baseConfig);
 
   const lines = component.render(60);
+  const text = lines.join("\n");
 
-  assert.ok(lines.some((line) => line.includes("Start review")));
-  assert.ok(lines.some((line) => line.includes("/review <review request>")));
-  assert.ok(lines.some((line) => line.includes("what do I review?")));
-  assert.ok(
-    lines.some((line) => line.includes("any context I should be aware of?")),
-  );
+  assert.ok(text.includes("Start review"));
+  assert.ok(text.includes("/review <review request>"));
+  assert.ok(text.includes("▶ review type"));
+  assert.ok(text.includes("[x] Free-form request"));
+  assert.ok(text.includes("[ ] Diff against ref"));
+  assert.ok(text.includes("[ ] PR/MR"));
+  assert.ok(text.includes("URL or number"));
+  assert.ok(text.includes("what do I review?"));
+  assert.ok(text.includes("Describe the code, behavior, or risk to review."));
+  assert.ok(text.includes("any context I should be aware of?"));
   for (const line of lines) {
     assert.ok(visibleWidth(line) <= 60, `line too wide: ${line}`);
   }
 });
 
-test("Tab and Shift+Tab move focus between primary and context fields", () => {
+test("Tab and Shift+Tab move focus between kind, primary, and context fields", () => {
   const { component } = createComponent(baseConfig);
   component.focused = true;
 
-  assert.ok(
-    component.render(72).some((line) => line.includes("▶ what do I review?")),
-  );
+  assert.ok(renderText(component).includes("▶ review type"));
+
+  component.handleInput?.("\t");
+  assert.ok(renderText(component).includes("▶ what do I review?"));
 
   component.handleInput?.("\t");
   assert.ok(
-    component
-      .render(72)
-      .some((line) => line.includes("▶ any context I should be aware of?")),
+    renderText(component).includes("▶ any context I should be aware of?"),
   );
 
   component.handleInput?.("\x1b[Z");
+  assert.ok(renderText(component).includes("▶ what do I review?"));
+});
+
+test("arrow and number keys change mode and update label and placeholder", () => {
+  const { component } = createComponent(baseConfig);
+
+  component.handleInput?.("\x1b[C");
+  let text = renderText(component);
+  assert.ok(text.includes("[x] Diff against ref"));
+  assert.ok(text.includes("ref:"));
+  assert.ok(text.includes("Enter ref or change id."));
+
+  component.handleInput?.("3");
+  text = renderText(component);
+  assert.ok(text.includes("[x] PR/MR URL or number"));
+  assert.ok(text.includes("pr:"));
   assert.ok(
-    component.render(72).some((line) => line.includes("▶ what do I review?")),
+    text.includes("Enter GitHub URL, GitLab URL, MR URL, or PR number."),
   );
 });
 
-test("blank primary value blocks submit and shows validation", () => {
+test("Enter on kind field moves to primary instead of submitting", () => {
   const { component, results } = createComponent(baseConfig);
 
   component.handleInput?.("\r");
 
   assert.deepEqual(results, []);
-  assert.ok(
-    component
-      .render(72)
-      .some((line) => line.includes("what do I review? is required.")),
-  );
+  assert.ok(renderText(component).includes("▶ what do I review?"));
 });
 
-test("Enter submits trimmed primary and context values", () => {
+test("blank primary value blocks submit and shows active-mode validation", () => {
+  const { component, results } = createComponent(baseConfig);
+
+  component.handleInput?.("2");
+  component.handleInput?.("\t");
+  component.handleInput?.("\r");
+
+  assert.deepEqual(results, []);
+  assert.ok(renderText(component).includes("ref: is required."));
+});
+
+test("Enter submits trimmed primary and context values with selected kind", () => {
   const { component, results } = createComponent({
     ...baseConfig,
-    initialPrimaryValue: "  auth flow  ",
+    initialKind: "pr",
+    initialPrimaryValue: "  https://github.com/o/r/pull/12  ",
     initialContext: "  Watch migration path.  ",
   });
 
+  component.handleInput?.("\t");
   component.handleInput?.("\r");
 
   assert.deepEqual(results, [
     {
       submitted: true,
-      primaryValue: "auth flow",
+      kind: "pr",
+      primaryValue: "https://github.com/o/r/pull/12",
       reviewContext: "Watch migration path.",
     },
   ]);
@@ -147,12 +179,14 @@ test("large bracketed paste submits expanded editor content", () => {
     (_value, index) => `review item ${index + 1}`,
   ).join("\n");
 
+  component.handleInput?.("\t");
   component.handleInput?.(`\x1b[200~${pastedTarget}\x1b[201~`);
   component.handleInput?.("\r");
 
   assert.deepEqual(results, [
     {
       submitted: true,
+      kind: "review",
       primaryValue: pastedTarget,
     },
   ]);
@@ -164,6 +198,7 @@ test("action row can cancel after keyboard navigation", () => {
     initialPrimaryValue: "auth flow",
   });
 
+  component.handleInput?.("\t");
   component.handleInput?.("\t");
   component.handleInput?.("\t");
   component.handleInput?.("\x1b[C");
