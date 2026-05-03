@@ -205,6 +205,37 @@ test("active finding detail scrolls on small terminals and keeps actions visible
   assert.ok(text.includes("Start fix"));
 });
 
+test("active finding detail strips control bytes and caps huge comments", () => {
+  const longComment = `${"x".repeat(20_000)}TAIL_SHOULD_NOT_RENDER`;
+  const { component } = createComponent({
+    ...baseConfig,
+    findings: [
+      finding({
+        id: "finding-a",
+        comment: `Safe \x1b[31mred\x1b[0m bell\x07 text\n${longComment}`,
+      }),
+    ],
+    initialSelectedFindingIds: ["finding-a"],
+    initialFixContext: undefined,
+  });
+
+  let text = component.render(80).join("\n");
+  const sanitizedDetailLine = component
+    .render(80)
+    .find((line) => line.includes("Safe red bell text"));
+  assert.ok(sanitizedDetailLine);
+  assert.ok(!sanitizedDetailLine.includes("\x1b"));
+  assert.ok(!sanitizedDetailLine.includes("\x07"));
+
+  for (let index = 0; index < 400; index += 1) {
+    component.handleInput?.("]");
+  }
+
+  text = component.render(80).join("\n");
+  assert.ok(text.includes("finding detail truncated"));
+  assert.ok(!text.includes("TAIL_SHOULD_NOT_RENDER"));
+});
+
 test("moving active finding resets detail scroll for the new finding", () => {
   const firstComment = Array.from(
     { length: 6 },
@@ -326,7 +357,34 @@ test("selection can submit a finding from an older review run", () => {
   ]);
 });
 
-test("selection rejects findings from multiple review runs", () => {
+test("select-all only selects open findings from the active review run", () => {
+  const { component, results } = createComponent({
+    ...baseConfig,
+    reviewRunId: undefined,
+    targetHint: undefined,
+    completedAt: undefined,
+    findings: [
+      finding({ id: "new-a", reviewRunId: "review-2" }),
+      finding({ id: "new-b", reviewRunId: "review-2" }),
+      finding({ id: "old", reviewRunId: "review-1" }),
+    ],
+    initialSelectedFindingIds: [],
+    initialFixContext: undefined,
+  });
+
+  component.handleInput?.("a");
+  component.handleInput?.("\x13");
+
+  assert.deepEqual(results, [
+    {
+      submitted: true,
+      reviewRunId: "review-2",
+      findingIds: ["new-a", "new-b"],
+    },
+  ]);
+});
+
+test("selection blocks adding findings from another review run", () => {
   const { component, results } = createComponent({
     ...baseConfig,
     reviewRunId: undefined,
@@ -340,10 +398,10 @@ test("selection rejects findings from multiple review runs", () => {
     initialFixContext: undefined,
   });
 
-  component.handleInput?.("a");
-  component.handleInput?.("\x13");
+  component.handleInput?.(" ");
+  component.handleInput?.("\x1b[B");
+  component.handleInput?.(" ");
 
-  assert.deepEqual(results, []);
   assert.ok(
     component
       .render(80)
@@ -351,6 +409,16 @@ test("selection rejects findings from multiple review runs", () => {
         line.includes("Selected findings must come from a single review run."),
       ),
   );
+
+  component.handleInput?.("\x13");
+
+  assert.deepEqual(results, [
+    {
+      submitted: true,
+      reviewRunId: "review-2",
+      findingIds: ["new"],
+    },
+  ]);
 });
 
 test("duplicate finding data stays visible and fails submit validation", () => {

@@ -91,6 +91,18 @@ const REVIEW_FIX_CONTEXT_LABEL =
 const REVIEW_FIX_KEY_HINT =
   "Up/Down move • Space toggle • active finding shows full text • [/] scroll detail • a select all open • Tab/Shift+Tab switch area • Enter/Ctrl+S submit • Alt+Enter newline • Esc cancel";
 const FINDING_SELECTION_KEY_SEPARATOR = "\u001f";
+const MAX_ACTIVE_FINDING_DETAIL_CHARS = 12_000;
+const FINDING_DETAIL_TRUNCATION_MESSAGE = "finding detail truncated";
+const ESCAPE_CHARACTER = String.fromCharCode(0x1b);
+const BELL_CHARACTER = String.fromCharCode(0x07);
+const ANSI_ESCAPE_SEQUENCE = new RegExp(
+  `${ESCAPE_CHARACTER}(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])`,
+  "g",
+);
+const OSC_ESCAPE_SEQUENCE = new RegExp(
+  `${ESCAPE_CHARACTER}\\][\\s\\S]*?(?:${BELL_CHARACTER}|${ESCAPE_CHARACTER}\\\\)`,
+  "g",
+);
 
 function buildFindingSelectionKey(
   reviewRunId: string,
@@ -478,6 +490,39 @@ function formatCompletedAt(
   return date.toISOString();
 }
 
+function sanitizeFindingCommentForDetail(comment: string): string {
+  return stripControlCharactersExceptNewlines(
+    comment.replace(OSC_ESCAPE_SEQUENCE, "").replace(ANSI_ESCAPE_SEQUENCE, ""),
+  ).replace(/\r\n?/g, "\n");
+}
+
+function stripControlCharactersExceptNewlines(text: string): string {
+  let sanitized = "";
+
+  for (const character of text) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint === undefined) {
+      continue;
+    }
+
+    if (codePoint === 0x09) {
+      sanitized += " ";
+      continue;
+    }
+
+    if (
+      (codePoint < 0x20 && codePoint !== 0x0a && codePoint !== 0x0d) ||
+      (codePoint >= 0x7f && codePoint <= 0x9f)
+    ) {
+      continue;
+    }
+
+    sanitized += character;
+  }
+
+  return sanitized;
+}
+
 class ReviewFixWidgetComponent implements Component, Focusable {
   private readonly contextEditor: Editor;
   private readonly findings: NormalizedReviewFixFinding[];
@@ -628,6 +673,7 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       ),
     );
   }
+
   private renderFindings(render: WidgetRenderHelpers): void {
     const { addLine } = render;
     this.renderFieldHeader(addLine, "findings", "findings");
@@ -741,10 +787,17 @@ class ReviewFixWidgetComponent implements Component, Focusable {
   ): string[] {
     const detailPrefix = "    ";
     const bodyWidth = Math.max(1, safeWidth - visibleWidth(detailPrefix));
-    const commentText = finding.comment.trim();
-    if (commentText.length === 0) {
+    const sanitizedComment = sanitizeFindingCommentForDetail(
+      finding.comment,
+    ).trim();
+    if (sanitizedComment.length === 0) {
       return [];
     }
+
+    const isCapped = sanitizedComment.length > MAX_ACTIVE_FINDING_DETAIL_CHARS;
+    const commentText = isCapped
+      ? sanitizedComment.slice(0, MAX_ACTIVE_FINDING_DETAIL_CHARS)
+      : sanitizedComment;
 
     const lines: string[] = [];
     for (const rawLine of commentText.split(/\r?\n/)) {
@@ -757,6 +810,10 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       for (const wrappedLine of wrappedLines) {
         lines.push(`${detailPrefix}${wrappedLine}`);
       }
+    }
+
+    if (isCapped) {
+      lines.push(`${detailPrefix}${FINDING_DETAIL_TRUNCATION_MESSAGE}`);
     }
 
     return lines;
@@ -779,6 +836,39 @@ class ReviewFixWidgetComponent implements Component, Focusable {
     }
 
     return "[ ]";
+  }
+
+  private getFindingBySelectionId(
+    selectionId: string,
+  ): NormalizedReviewFixFinding | undefined {
+    const selectedFinding = this.findings.find(
+      (finding) =>
+        finding.selectionKey === selectionId || finding.id === selectionId,
+    );
+
+    if (selectedFinding !== undefined) {
+      return selectedFinding;
+    }
+
+    return undefined;
+  }
+
+  private getSelectedReviewRunIds(): Set<string> {
+    const selectedRunIds = new Set<string>();
+
+    for (const selectedId of this.selectedFindingIds) {
+      const selectedFinding = this.getFindingBySelectionId(selectedId);
+      if (selectedFinding === undefined) {
+        continue;
+      }
+
+      const selectedRunId = this.getReviewRunId(selectedFinding);
+      if (selectedRunId.length > 0) {
+        selectedRunIds.add(selectedRunId);
+      }
+    }
+
+    return selectedRunIds;
   }
 
   private getReviewRunId(finding: NormalizedReviewFixFinding): string {
@@ -909,23 +999,69 @@ class ReviewFixWidgetComponent implements Component, Focusable {
       return;
     }
 
-    if (
+    const wasSelected =
       this.selectedFindingIds.has(finding.selectionKey) ||
-      this.selectedFindingIds.has(findingId)
-    ) {
+      this.selectedFindingIds.has(findingId);
+
+    if (wasSelected) {
       this.selectedFindingIds.delete(finding.selectionKey);
       this.selectedFindingIds.delete(findingId);
-    } else {
-      this.selectedFindingIds.add(finding.selectionKey);
+      this.validationMessage = undefined;
+      this.requestRender();
+      return;
     }
 
+    const selectedReviewRunIds = this.getSelectedReviewRunIds();
+    if (selectedReviewRunIds.size > 1) {
+      this.validationMessage =
+        "Selected findings must come from a single review run.";
+      this.requestRender();
+      return;
+    }
+
+    const selectedReviewRunId = selectedReviewRunIds.values().next().value;
+    const findingReviewRunId = this.getReviewRunId(finding);
+    if (
+      selectedReviewRunId !== undefined &&
+      selectedReviewRunId.length > 0 &&
+      selectedReviewRunId !== findingReviewRunId
+    ) {
+      this.validationMessage =
+        "Selected findings must come from a single review run.";
+      this.requestRender();
+      return;
+    }
+
+    this.selectedFindingIds.add(finding.selectionKey);
     this.validationMessage = undefined;
     this.requestRender();
   }
 
   private toggleAllOpenFindings(): void {
+    const activeFinding = this.findings[this.activeFindingIndex];
+    if (activeFinding === undefined) {
+      return;
+    }
+
+    const selectedReviewRunIds = this.getSelectedReviewRunIds();
+    if (selectedReviewRunIds.size > 1) {
+      this.validationMessage =
+        "Selected findings must come from a single review run.";
+      this.requestRender();
+      return;
+    }
+
+    const selectedRunId = selectedReviewRunIds.values().next().value;
+    const targetReviewRunId =
+      selectedRunId === undefined
+        ? this.getReviewRunId(activeFinding)
+        : selectedRunId;
+
     const openFindingKeys = this.findings
-      .filter((finding) => !finding.fixed)
+      .filter(
+        (finding) =>
+          !finding.fixed && this.getReviewRunId(finding) === targetReviewRunId,
+      )
       .map((finding) => finding.selectionKey)
       .filter((findingId) => findingId.length > 0);
 
