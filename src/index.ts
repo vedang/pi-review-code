@@ -27,10 +27,9 @@ import { resolveReviewTarget } from "./targets.js";
 export const REVIEW_HELP_TEXT = [
   "pi-review-code review flow is installed.",
   "Usage:",
-  "- /review <review request>",
+  "- /review [target or request]",
+  "  Choose review type in the widget: free-form, diff against ref, or PR/MR.",
   "- /review-fix",
-  "- /review-diff-against <ref>",
-  "- /review-pr <github-url|gitlab-url|github-number>",
 ].join("\n");
 
 export const REVIEW_FIX_HELP_TEXT = [
@@ -101,7 +100,7 @@ function registerInfoCommand(
 }
 
 type ReviewCommandDefinition = {
-  name: "review-fix" | "review" | "review-diff-against" | "review-pr";
+  name: "review-fix" | "review";
   description: string;
   helpText: string;
   hasEmptyArgsHelp?: boolean;
@@ -120,16 +119,6 @@ const REVIEW_COMMANDS = {
   review: {
     name: "review",
     description: "Start a context-rich code review",
-    helpText: REVIEW_HELP_TEXT,
-  },
-  reviewDiffAgainst: {
-    name: "review-diff-against",
-    description: "Start a context-rich code review from local diff",
-    helpText: REVIEW_HELP_TEXT,
-  },
-  reviewPr: {
-    name: "review-pr",
-    description: "Start a context-rich code review from a PR",
     helpText: REVIEW_HELP_TEXT,
   },
 } as const satisfies Record<string, ReviewCommandDefinition>;
@@ -233,16 +222,6 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
     {
       ...REVIEW_COMMANDS.review,
       runtimeHandler: (args, ctx) => controller.handleReviewCommand(args, ctx),
-    },
-    {
-      ...REVIEW_COMMANDS.reviewDiffAgainst,
-      runtimeHandler: (args, ctx) =>
-        controller.handleReviewDiffAgainstCommand(args, ctx),
-    },
-    {
-      ...REVIEW_COMMANDS.reviewPr,
-      runtimeHandler: (args, ctx) =>
-        controller.handleReviewPrCommand(args, ctx),
     },
   ];
 

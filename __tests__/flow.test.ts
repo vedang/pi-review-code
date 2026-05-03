@@ -36,7 +36,12 @@ function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
 }
 
 type InputWidgetResult =
-  | { submitted: true; primaryValue: string; reviewContext?: string }
+  | {
+      submitted: true;
+      kind: "review" | "diff-against" | "pr";
+      primaryValue: string;
+      reviewContext?: string;
+    }
   | { submitted: false };
 
 type InputWidgetCall = {
@@ -257,6 +262,7 @@ test("review flow prompts for target and context before launching", async () => 
     editorResult: "Edited review prompt",
     inputWidgetResult: {
       submitted: true,
+      kind: "review",
       primaryValue: "review auth boundaries",
       reviewContext: "Focus on token refresh races.",
     },
@@ -267,8 +273,8 @@ test("review flow prompts for target and context before launching", async () => 
   assert.equal(harness.inputWidgetCalls.length, 1);
   assert.deepEqual(harness.inputWidgetCalls[0], {
     title: "Start review",
-    helpText: "Usage:\n  /review <review request>",
-    initialKind: "review",
+    helpText:
+      "Usage:\n  /review [target or request]\n  choose review type in the widget",
   });
   assert.deepEqual(harness.resolvedTargets, [
     {
@@ -286,6 +292,7 @@ test("review flow pre-fills widget from command args", async () => {
     editorResult: "Edited review prompt",
     inputWidgetResult: {
       submitted: true,
+      kind: "review",
       primaryValue: "review auth boundaries",
     },
   });
@@ -308,26 +315,52 @@ test("review flow pre-fills widget from command args", async () => {
   ]);
 });
 
-test("review flow prompts selector commands with target context", async () => {
+test("review flow preselects PR-like /review args but leaves refs ambiguous", async () => {
+  const prHarness = createHarness({
+    inputWidgetResult: { submitted: false },
+  });
+
+  await prHarness.controller.handleReviewCommand(
+    "https://github.com/owner/repo/pull/123",
+    prHarness.ctx,
+  );
+
+  assert.equal(prHarness.inputWidgetCalls[0]?.initialKind, "pr");
+  assert.equal(
+    prHarness.inputWidgetCalls[0]?.initialPrimaryValue,
+    "https://github.com/owner/repo/pull/123",
+  );
+
+  const refHarness = createHarness({
+    inputWidgetResult: { submitted: false },
+  });
+
+  await refHarness.controller.handleReviewCommand(
+    "origin/main",
+    refHarness.ctx,
+  );
+
+  assert.equal(refHarness.inputWidgetCalls[0]?.initialKind, "review");
+  assert.equal(
+    refHarness.inputWidgetCalls[0]?.initialPrimaryValue,
+    "origin/main",
+  );
+});
+
+test("review flow converts widget selector modes to review targets", async () => {
   const diffHarness = createHarness({
     editorResult: "Edited diff prompt",
     inputWidgetResult: {
       submitted: true,
+      kind: "diff-against",
       primaryValue: "origin/main",
       reviewContext: "Only review auth middleware changes.",
     },
   });
 
-  await diffHarness.controller.handleReviewDiffAgainstCommand(
-    "origin/main",
-    diffHarness.ctx,
-  );
+  await diffHarness.controller.handleReviewCommand("", diffHarness.ctx);
 
-  assert.equal(diffHarness.inputWidgetCalls[0]?.initialKind, "diff-against");
-  assert.equal(
-    diffHarness.inputWidgetCalls[0]?.initialPrimaryValue,
-    "origin/main",
-  );
+  assert.equal(diffHarness.inputWidgetCalls[0]?.initialKind, undefined);
   assert.deepEqual(diffHarness.resolvedTargets, [
     {
       kind: "diff-against",
@@ -341,12 +374,13 @@ test("review flow prompts selector commands with target context", async () => {
     editorResult: "Edited PR prompt",
     inputWidgetResult: {
       submitted: true,
+      kind: "pr",
       primaryValue: "123",
       reviewContext: "Regression report says logout is flaky.",
     },
   });
 
-  await prHarness.controller.handleReviewPrCommand("123", prHarness.ctx);
+  await prHarness.controller.handleReviewCommand("123", prHarness.ctx);
 
   assert.equal(prHarness.inputWidgetCalls[0]?.initialKind, "pr");
   assert.equal(prHarness.inputWidgetCalls[0]?.initialPrimaryValue, "123");
@@ -384,6 +418,7 @@ test("review flow checks active model before showing widget", async () => {
     model: null,
     inputWidgetResult: {
       submitted: true,
+      kind: "review",
       primaryValue: "review auth boundaries",
     },
   });
@@ -432,6 +467,11 @@ test("review flow launches PR review after resolving PR metadata", async () => {
   const selector = "https://github.com/owner/repo/pull/123";
   const harness = createHarness({
     editorResult: "Edited PR review prompt",
+    inputWidgetResult: {
+      submitted: true,
+      kind: "pr",
+      primaryValue: selector,
+    },
     target: {
       kind: "pr",
       targetHint: selector,
@@ -456,7 +496,7 @@ test("review flow launches PR review after resolving PR metadata", async () => {
     },
   });
 
-  await harness.controller.handleReviewPrCommand(selector, harness.ctx);
+  await harness.controller.handleReviewCommand(selector, harness.ctx);
 
   assert.deepEqual(harness.resolvedTargets, [
     { kind: "pr", selector, targetHint: selector },
@@ -515,12 +555,17 @@ test("review flow passes resolved diff text to prompt draft builder", async () =
       },
     ],
   };
-  const harness = createHarness({ editorResult: "Edited prompt", target });
+  const harness = createHarness({
+    editorResult: "Edited prompt",
+    inputWidgetResult: {
+      submitted: true,
+      kind: "diff-against",
+      primaryValue: "origin/main",
+    },
+    target,
+  });
 
-  await harness.controller.handleReviewDiffAgainstCommand(
-    "origin/main",
-    harness.ctx,
-  );
+  await harness.controller.handleReviewCommand("origin/main", harness.ctx);
 
   assert.deepEqual(harness.draftRequests, [target]);
   assert.deepEqual(harness.draftOptions, [

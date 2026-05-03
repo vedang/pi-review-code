@@ -1,22 +1,13 @@
-import type { ReviewCommand, ReviewTarget } from "./types.js";
+import type { ReviewCommand } from "./types.js";
 
 function formatUsage(...lines: string[]): string {
   return ["Usage:", ...lines].join("\n");
 }
 
 export const REVIEW_USAGE = formatUsage(
-  "  /review <review request>",
+  "  /review [target or request]",
+  "  choose review type in the widget",
   "  /review-fix",
-  "  /review-diff-against <ref>",
-  "  /review-pr <github-url|gitlab-url|github-number>",
-);
-
-export const REVIEW_DIFF_AGAINST_USAGE = formatUsage(
-  "  /review-diff-against <ref>",
-);
-
-export const REVIEW_PR_USAGE = formatUsage(
-  "  /review-pr <github-url|gitlab-url|github-number>",
 );
 
 export const REVIEW_FIX_USAGE = formatUsage("  /review-fix");
@@ -107,35 +98,11 @@ function requireNonBlank(
   return trimmed;
 }
 
-function requireSingleArg(
-  args: string[],
-  missingMessage: string,
-  extraMessage: string,
-): string {
-  if (args.length < 1 || isBlank(args[0])) {
-    throw new Error(missingMessage);
-  }
-  if (args.length > 1) {
-    throw new Error(extraMessage);
-  }
-
-  return args[0].trim();
-}
-
 function withReviewContext(reviewContext?: string): { reviewContext?: string } {
   const trimmed = reviewContext?.trim();
   return trimmed === undefined || trimmed.length === 0
     ? {}
     : { reviewContext: trimmed };
-}
-
-function parseSingleValueTarget(
-  args: string[],
-  missingMessage: string,
-  extraMessage: string,
-  buildTarget: (value: string) => ReviewTarget,
-): ReviewTarget {
-  return buildTarget(requireSingleArg(args, missingMessage, extraMessage));
 }
 
 function parsePromptText(input: string): ReviewCommand {
@@ -160,45 +127,32 @@ function parsePromptText(input: string): ReviewCommand {
   };
 }
 
-function parseReviewDiffAgainstTargetArgs(args: string[]): ReviewTarget {
-  return parseSingleValueTarget(
-    args,
-    "/review-diff-against requires a ref or change id.",
-    "/review-diff-against accepts exactly one ref or change id.",
-    (ref) => ({
-      kind: "diff-against",
-      ref,
-      targetHint: ref,
-    }),
-  );
+const DIFF_AGAINST_REQUIRED_MESSAGE =
+  "Select diff against ref and enter a ref or change id.";
+const PR_REQUIRED_MESSAGE =
+  "Select PR/MR and enter a GitHub URL, GitLab URL, MR URL, or PR number.";
+
+type UnifiedReviewPrefillKind = "review" | "diff-against" | "pr";
+
+export type ParsedUnifiedReviewArgs = {
+  initialKind?: UnifiedReviewPrefillKind;
+  initialPrimaryValue?: string;
+};
+
+function isPullOrMergeRequestUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      /\/pull\/\d+\/?$/.test(url.pathname) ||
+      /\/-\/merge_requests\/\d+\/?$/.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
 }
 
-function parseReviewPrTargetArgs(args: string[]): ReviewTarget {
-  return parseSingleValueTarget(
-    args,
-    "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
-    "/review-pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
-    (selector) => ({
-      kind: "pr",
-      selector,
-      targetHint: selector,
-    }),
-  );
-}
-
-function parseReviewSelectorArgs(
-  commandName: "diff-against" | "pr",
-  args: string[],
-): ReviewCommand {
-  const target =
-    commandName === "diff-against"
-      ? parseReviewDiffAgainstTargetArgs(args)
-      : parseReviewPrTargetArgs(args);
-
-  return {
-    kind: "review",
-    target,
-  };
+function isPrLikeSelector(value: string): boolean {
+  return /^\d+$/.test(value) || isPullOrMergeRequestUrl(value);
 }
 
 export function buildReviewCommandFromInput(input: {
@@ -222,10 +176,7 @@ export function buildReviewDiffAgainstCommandFromInput(input: {
   ref: string;
   reviewContext?: string;
 }): ReviewCommand {
-  const ref = requireNonBlank(
-    input.ref,
-    "/review-diff-against requires a ref or change id.",
-  );
+  const ref = requireNonBlank(input.ref, DIFF_AGAINST_REQUIRED_MESSAGE);
 
   return {
     kind: "review",
@@ -242,10 +193,7 @@ export function buildReviewPrCommandFromInput(input: {
   selector: string;
   reviewContext?: string;
 }): ReviewCommand {
-  const selector = requireNonBlank(
-    input.selector,
-    "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
-  );
+  const selector = requireNonBlank(input.selector, PR_REQUIRED_MESSAGE);
 
   return {
     kind: "review",
@@ -262,10 +210,17 @@ export function parseReviewArgs(input: string): ReviewCommand {
   return parsePromptText(input);
 }
 
-export function parseReviewDiffAgainstArgs(input: string): ReviewCommand {
-  return parseReviewSelectorArgs("diff-against", tokenizeCommandArgs(input));
-}
+export function parseUnifiedReviewArgs(input: string): ParsedUnifiedReviewArgs {
+  const args = tokenizeCommandArgs(input);
+  const primaryValue = args.join(" ").trim();
 
-export function parseReviewPrArgs(input: string): ReviewCommand {
-  return parseReviewSelectorArgs("pr", tokenizeCommandArgs(input));
+  if (primaryValue.length === 0) {
+    return {};
+  }
+
+  return {
+    initialKind:
+      args.length === 1 && isPrLikeSelector(primaryValue) ? "pr" : "review",
+    initialPrimaryValue: primaryValue,
+  };
 }

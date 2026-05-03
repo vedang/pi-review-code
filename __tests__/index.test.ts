@@ -163,9 +163,9 @@ test("extension registers review commands and message renderers", () => {
   const harness = createHarness();
 
   assert.ok(harness.commands.has("review"));
-  assert.ok(harness.commands.has("review-diff-against"));
-  assert.ok(harness.commands.has("review-pr"));
   assert.ok(harness.commands.has("review-fix"));
+  assert.equal(harness.commands.has("review-diff-against"), false);
+  assert.equal(harness.commands.has("review-pr"), false);
   assert.ok(harness.messageRenderers.has("pi-review-code:prompt"));
   assert.ok(harness.messageRenderers.has("pi-review-code:review-summary"));
   assert.ok(harness.messageRenderers.has("pi-review-code:review-fix-summary"));
@@ -173,8 +173,6 @@ test("extension registers review commands and message renderers", () => {
 
 const scaffoldHelpCases = [
   ["review", REVIEW_HELP_TEXT],
-  ["review-diff-against", REVIEW_HELP_TEXT],
-  ["review-pr", REVIEW_HELP_TEXT],
   ["review-fix", REVIEW_FIX_HELP_TEXT],
 ] as const;
 
@@ -210,21 +208,22 @@ test("/review-fix rejects runtime selector args", async () => {
   );
 });
 
-for (const commandName of [
-  "review",
-  "review-diff-against",
-  "review-pr",
-] as const) {
-  test(`/${commandName} opens runtime input widget`, async () => {
-    const harness = createRuntimeHarness();
+test("/review opens runtime input widget", async () => {
+  const harness = createRuntimeHarness();
 
-    await runCommand(harness, commandName);
+  await runCommand(harness, "review");
 
-    assert.equal(harness.customWidgetCalls.length, 1);
-    assert.equal(harness.customWidgetCalls[0]?.options, undefined);
-    assertSingleNotification(harness, "Review cancelled.");
-  });
-}
+  assert.equal(harness.customWidgetCalls.length, 1);
+  assert.equal(harness.customWidgetCalls[0]?.options, undefined);
+  assertSingleNotification(harness, "Review cancelled.");
+});
+
+test("runtime does not register legacy selector commands", () => {
+  const harness = createRuntimeHarness();
+
+  assert.equal(harness.commands.has("review-diff-against"), false);
+  assert.equal(harness.commands.has("review-pr"), false);
+});
 
 test("extension abandons persisted active review state on session_start", async () => {
   const harness = createRuntimeHarness();

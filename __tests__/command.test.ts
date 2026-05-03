@@ -2,29 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  REVIEW_DIFF_AGAINST_USAGE,
   REVIEW_FIX_USAGE,
-  REVIEW_PR_USAGE,
   REVIEW_USAGE,
   buildReviewCommandFromInput,
   buildReviewDiffAgainstCommandFromInput,
   buildReviewPrCommandFromInput,
   parseReviewArgs,
-  parseReviewDiffAgainstArgs,
-  parseReviewPrArgs,
+  parseUnifiedReviewArgs,
 } from "../src/command.js";
 
 function reviewPromptCommand(prompt: string) {
   return {
     kind: "review",
     target: { kind: "prompt", prompt, targetHint: prompt },
-  };
-}
-
-function reviewDiffCommand(ref: string) {
-  return {
-    kind: "review",
-    target: { kind: "diff-against", ref, targetHint: ref },
   };
 }
 
@@ -107,33 +97,6 @@ test("builds /review command from widget input with optional context", () => {
   );
 });
 
-const singleTargetCommandCases = [
-  {
-    commandName: "review-diff-against",
-    parse: parseReviewDiffAgainstArgs,
-    validInput: "origin/main",
-    quotedInput: '"change id"',
-    validExpected: reviewDiffCommand("origin/main"),
-    quotedExpected: reviewDiffCommand("change id"),
-    missingMessage: "/review-diff-against requires a ref or change id.",
-    extraInput: "origin/main extra",
-    extraMessage: "/review-diff-against accepts exactly one ref or change id.",
-  },
-  {
-    commandName: "review-pr",
-    parse: parseReviewPrArgs,
-    validInput: "https://github.com/owner/repo/pull/123",
-    quotedInput: '"group/project!42"',
-    validExpected: reviewPrCommand("https://github.com/owner/repo/pull/123"),
-    quotedExpected: reviewPrCommand("group/project!42"),
-    missingMessage:
-      "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
-    extraInput: "123 extra",
-    extraMessage:
-      "/review-pr accepts exactly one GitHub URL, GitLab URL, or GitHub number.",
-  },
-] as const;
-
 test("builds selector review commands from widget input with optional context", () => {
   assert.deepEqual(
     buildReviewDiffAgainstCommandFromInput({
@@ -161,50 +124,64 @@ test("builds selector review commands from widget input with optional context", 
 
   assert.throws(
     () => buildReviewDiffAgainstCommandFromInput({ ref: "" }),
-    new Error("/review-diff-against requires a ref or change id."),
+    new Error("Select diff against ref and enter a ref or change id."),
   );
   assert.throws(
     () => buildReviewPrCommandFromInput({ selector: "" }),
     new Error(
-      "/review-pr requires a GitHub URL, GitLab URL, or GitHub number.",
+      "Select PR/MR and enter a GitHub URL, GitLab URL, MR URL, or PR number.",
     ),
   );
 });
 
-for (const testCase of singleTargetCommandCases) {
-  test(`parses /${testCase.commandName} target`, () => {
-    assert.deepEqual(
-      testCase.parse(testCase.validInput),
-      testCase.validExpected,
-    );
-    assert.deepEqual(
-      testCase.parse(testCase.quotedInput),
-      testCase.quotedExpected,
-    );
+test("parses unified /review widget prefill args", () => {
+  assert.deepEqual(parseUnifiedReviewArgs(""), {});
+  assert.deepEqual(parseUnifiedReviewArgs("   \t"), {});
+  assert.deepEqual(parseUnifiedReviewArgs('review "database schema"'), {
+    initialKind: "review",
+    initialPrimaryValue: "review database schema",
   });
-
-  test(`rejects invalid /${testCase.commandName} args`, () => {
-    assert.throws(() => testCase.parse(""), new Error(testCase.missingMessage));
-    assert.throws(
-      () => testCase.parse(testCase.extraInput),
-      new Error(testCase.extraMessage),
-    );
-    assert.throws(
-      () => testCase.parse('""'),
-      new Error(testCase.missingMessage),
-    );
+  assert.deepEqual(
+    parseUnifiedReviewArgs("https://github.com/owner/repo/pull/123"),
+    {
+      initialKind: "pr",
+      initialPrimaryValue: "https://github.com/owner/repo/pull/123",
+    },
+  );
+  assert.deepEqual(
+    parseUnifiedReviewArgs(
+      "https://gitlab.com/group/project/-/merge_requests/42",
+    ),
+    {
+      initialKind: "pr",
+      initialPrimaryValue:
+        "https://gitlab.com/group/project/-/merge_requests/42",
+    },
+  );
+  assert.deepEqual(parseUnifiedReviewArgs("123"), {
+    initialKind: "pr",
+    initialPrimaryValue: "123",
   });
-}
+  assert.deepEqual(parseUnifiedReviewArgs("origin/main"), {
+    initialKind: "review",
+    initialPrimaryValue: "origin/main",
+  });
+  assert.deepEqual(parseUnifiedReviewArgs("abc123"), {
+    initialKind: "review",
+    initialPrimaryValue: "abc123",
+  });
+});
 
 test("review-specific usage constants mention only supported commands", () => {
   assertUsageContains(REVIEW_USAGE, [
-    /\/review <review request>/,
-    /\/review-diff-against <ref>/,
-    /\/review-pr <github-url\|gitlab-url\|github-number>/,
+    /\/review \[target or request\]/,
+    /choose review type/m,
     /\/review-fix$/m,
   ]);
   assertUsageContains(REVIEW_FIX_USAGE, [/\/review-fix$/m]);
   assertUsageExcludes(`${REVIEW_USAGE}\n${REVIEW_FIX_USAGE}`, [
+    /\/review-diff-against/,
+    /\/review-pr/,
     /\/review-fix .*list/,
     /\/review-fix .*latest/,
     /\/review-fix .*run/,
@@ -212,20 +189,10 @@ test("review-specific usage constants mention only supported commands", () => {
     /<review-run-id>/,
     /<finding-id>/,
   ]);
-  assertUsageContains(REVIEW_DIFF_AGAINST_USAGE, [
-    /\/review-diff-against <ref>/,
-  ]);
-  assertUsageContains(REVIEW_PR_USAGE, [
-    /\/review-pr <github-url\|gitlab-url\|github-number>/,
-  ]);
 });
 
 test("rejects unterminated quotes", () => {
-  for (const parse of [
-    parseReviewArgs,
-    parseReviewDiffAgainstArgs,
-    parseReviewPrArgs,
-  ]) {
+  for (const parse of [parseReviewArgs, parseUnifiedReviewArgs]) {
     assert.throws(
       () => parse('"unfinished'),
       new Error("Unterminated quote in command arguments."),
