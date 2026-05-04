@@ -315,7 +315,7 @@ test("review flow pre-fills widget from command args", async () => {
   ]);
 });
 
-test("review flow preselects PR-like /review args but leaves refs ambiguous", async () => {
+test("review flow preselects widget modes from /review args", async () => {
   const prHarness = createHarness({
     inputWidgetResult: { submitted: false },
   });
@@ -329,6 +329,36 @@ test("review flow preselects PR-like /review args but leaves refs ambiguous", as
   assert.equal(
     prHarness.inputWidgetCalls[0]?.initialPrimaryValue,
     "https://github.com/owner/repo/pull/123",
+  );
+
+  const explicitPrHarness = createHarness({
+    inputWidgetResult: { submitted: false },
+  });
+
+  await explicitPrHarness.controller.handleReviewCommand(
+    "pr https://github.com/owner/repo/pull/123",
+    explicitPrHarness.ctx,
+  );
+
+  assert.equal(explicitPrHarness.inputWidgetCalls[0]?.initialKind, "pr");
+  assert.equal(
+    explicitPrHarness.inputWidgetCalls[0]?.initialPrimaryValue,
+    "https://github.com/owner/repo/pull/123",
+  );
+
+  const diffHarness = createHarness({
+    inputWidgetResult: { submitted: false },
+  });
+
+  await diffHarness.controller.handleReviewCommand(
+    "diff-against origin/main",
+    diffHarness.ctx,
+  );
+
+  assert.equal(diffHarness.inputWidgetCalls[0]?.initialKind, "diff-against");
+  assert.equal(
+    diffHarness.inputWidgetCalls[0]?.initialPrimaryValue,
+    "origin/main",
   );
 
   const refHarness = createHarness({

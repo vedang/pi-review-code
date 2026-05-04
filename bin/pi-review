@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  pi-review [request]
+  pi-review diff-against [ref]
+  pi-review pr [url-or-number]
+  pi-review mr [url-or-number]
+
+Examples:
+  pi-review look at auth implementation in this code
+  pi-review diff-against origin/main
+  pi-review pr https://github.com/owner/repo/pull/123
+
+By default this loads pi-review-code from this package and disables other
+extension discovery to avoid duplicate /review commands. Set
+PI_REVIEW_USE_INSTALLED=1 to use the /review command already installed in your
+normal pi setup instead.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+source_path="${BASH_SOURCE[0]}"
+while [[ -L "$source_path" ]]; do
+  source_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+  source_path="$(readlink -- "$source_path")"
+  [[ "$source_path" == /* ]] || source_path="$source_dir/$source_path"
+done
+script_dir="$(cd -P -- "$(dirname -- "$source_path")" && pwd)"
+package_root="$(cd -P -- "$script_dir/.." && pwd)"
+
+join_args() {
+  local IFS=" "
+  printf '%s' "$*"
+}
+
+prompt_args="$(join_args "$@")"
+review_command="/review"
+if [[ -n "$prompt_args" ]]; then
+  review_command+=" $prompt_args"
+fi
+
+if [[ "${PI_REVIEW_USE_INSTALLED:-}" == "1" ]]; then
+  exec pi "$review_command"
+fi
+
+extension_source="${PI_REVIEW_EXTENSION_SOURCE:-$package_root}"
+exec pi --no-extensions -e "$extension_source" "$review_command"

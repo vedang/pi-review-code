@@ -141,6 +141,28 @@ test("parses unified /review widget prefill args", () => {
     initialKind: "review",
     initialPrimaryValue: "review database schema",
   });
+  assert.deepEqual(parseUnifiedReviewArgs("diff-against origin/main"), {
+    initialKind: "diff-against",
+    initialPrimaryValue: "origin/main",
+  });
+  assert.deepEqual(parseUnifiedReviewArgs("diff origin/main"), {
+    initialKind: "diff-against",
+    initialPrimaryValue: "origin/main",
+  });
+  assert.deepEqual(parseUnifiedReviewArgs("diff-against"), {
+    initialKind: "diff-against",
+  });
+  assert.deepEqual(
+    parseUnifiedReviewArgs("pr https://github.com/owner/repo/pull/123"),
+    {
+      initialKind: "pr",
+      initialPrimaryValue: "https://github.com/owner/repo/pull/123",
+    },
+  );
+  assert.deepEqual(parseUnifiedReviewArgs("mr 42"), {
+    initialKind: "pr",
+    initialPrimaryValue: "42",
+  });
   assert.deepEqual(
     parseUnifiedReviewArgs("https://github.com/owner/repo/pull/123"),
     {

@@ -4,6 +4,9 @@
   "description": "Context-rich code review extension for pi.",
   "type": "module",
   "main": "./src/index.ts",
+  "bin": {
+    "pi-review": "./bin/pi-review"
+  },
   "keywords": ["pi-package", "pi", "extension", "review", "code-review"],
   "pi": {
     "extensions": ["./src/index.ts"]

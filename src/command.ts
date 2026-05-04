@@ -134,6 +134,15 @@ const PR_REQUIRED_MESSAGE =
 
 type UnifiedReviewPrefillKind = "review" | "diff-against" | "pr";
 
+const UNIFIED_REVIEW_KIND_PREFIXES: Partial<
+  Record<string, UnifiedReviewPrefillKind>
+> = {
+  "diff-against": "diff-against",
+  diff: "diff-against",
+  pr: "pr",
+  mr: "pr",
+};
+
 export type ParsedUnifiedReviewArgs = {
   initialKind?: UnifiedReviewPrefillKind;
   initialPrimaryValue?: string;
@@ -212,11 +221,23 @@ export function parseReviewArgs(input: string): ReviewCommand {
 
 export function parseUnifiedReviewArgs(input: string): ParsedUnifiedReviewArgs {
   const args = tokenizeCommandArgs(input);
-  const primaryValue = args.join(" ").trim();
 
-  if (primaryValue.length === 0) {
+  if (args.length === 0) {
     return {};
   }
+
+  const explicitKind = UNIFIED_REVIEW_KIND_PREFIXES[args[0] ?? ""];
+  if (explicitKind !== undefined) {
+    const explicitPrimaryValue = args.slice(1).join(" ").trim();
+    return {
+      initialKind: explicitKind,
+      ...(explicitPrimaryValue.length > 0
+        ? { initialPrimaryValue: explicitPrimaryValue }
+        : {}),
+    };
+  }
+
+  const primaryValue = args.join(" ").trim();
 
   return {
     initialKind:

@@ -18,6 +18,36 @@ pi install git:github.com/vedang/pi-review-code
 pi install -l git:github.com/vedang/pi-review-code
 ```
 
+## Standalone launcher
+
+`pi-review-code` also ships a small `pi-review` launcher. Run it from the repo you want to review:
+
+```bash
+pi-review look at auth implementation in this code
+pi-review diff-against origin/main
+pi-review pr https://github.com/owner/repo/pull/123
+```
+
+The launcher starts interactive Pi, loads this extension, and sends an initial `/review ...` command so the review widget opens immediately with the target field prefilled. By default it uses `--no-extensions -e <pi-review-code package>` to avoid duplicate `/review` commands. If you already install the extension in your normal Pi setup and want to use that setup instead:
+
+```bash
+PI_REVIEW_USE_INSTALLED=1 pi-review diff-against origin/main
+```
+
+For a local checkout, add it to your PATH or symlink it:
+
+```bash
+ln -sf "$PWD/bin/pi-review" ~/.local/bin/pi-review
+```
+
+### Minimal alias alternative
+
+If the extension is already installed in Pi, this simple shell function is enough:
+
+```bash
+pi-review() { pi "/review $*"; }
+```
+
 ## Commands
 
 ### `/review [target or request]`
@@ -36,7 +66,13 @@ Start any review from one widget. Choose review type, then fill target plus opti
 /review 123
 ```
 
-Typed arguments prefill the target field. PR/MR URLs and number-only selectors also preselect PR/MR mode; ambiguous refs such as `origin/main` stay in free-form mode until you choose diff mode.
+Typed arguments prefill the target field. PR/MR URLs and number-only selectors also preselect PR/MR mode; ambiguous refs such as `origin/main` stay in free-form mode until you choose diff mode. Use explicit prefixes when you want the widget to open directly in a selector mode:
+
+```text
+/review diff-against origin/main
+/review pr https://github.com/owner/repo/pull/123
+/review mr 123
+```
 
 ### `/review-fix`
 
