@@ -1,5 +1,5 @@
-import { completeSimple } from "@mariozechner/pi-ai";
 import type { SimpleStreamOptions } from "@mariozechner/pi-ai";
+import { completeSimple } from "@mariozechner/pi-ai";
 import type { ReviewPromptDraftRequest } from "./prompts.js";
 
 export type DraftTextBlock = {

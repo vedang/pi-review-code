@@ -2,12 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-
-import type {
-  ReviewFixWidgetConfig,
-  ReviewFixWidgetResult,
-} from "../src/review-fix-widget.js";
-
 import { REVIEW_FIX_USAGE } from "../src/command.js";
 import {
   REVIEW_FIX_SUMMARY_ENTRY_TYPE,
@@ -18,6 +12,10 @@ import {
   createReviewFlowController,
 } from "../src/flow.js";
 import { buildReviewFixPrompt } from "../src/prompts.js";
+import type {
+  ReviewFixWidgetConfig,
+  ReviewFixWidgetResult,
+} from "../src/review-fix-widget.js";
 import type { ReviewComment } from "../src/types.js";
 
 function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {

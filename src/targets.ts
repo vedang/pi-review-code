@@ -1,20 +1,14 @@
-import type {
-  ExecCommand,
-  ResolvedDiffAgainstTarget,
-  ResolvedPrTarget,
-  ResolvedPromptTarget,
-  ResolvedReviewTarget,
-  ReviewTarget,
-  ReviewTargetCommandHint,
-} from "./types.js";
-
 import {
   buildGitDiffCommand,
   buildGitDiffForFileCommand,
   buildGitDiffNameOnlyCommand,
   buildGitDiffStatCommand,
+  buildJjDiffCommand,
+  buildJjDiffForFileCommand,
+  buildJjDiffNameOnlyCommand,
+  buildJjDiffStatCommand,
   normalizeGitFileList,
-  validateGitRef,
+  validateDiffRef,
 } from "./git.js";
 import {
   buildGitHubPrDiffCommand,
@@ -28,6 +22,15 @@ import {
   normalizeGitLabMrView,
   parseGitLabMrSelector,
 } from "./gitlab.js";
+import type {
+  ExecCommand,
+  ResolvedDiffAgainstTarget,
+  ResolvedPrTarget,
+  ResolvedPromptTarget,
+  ResolvedReviewTarget,
+  ReviewTarget,
+  ReviewTargetCommandHint,
+} from "./types.js";
 
 const MAX_DIFF_AGAINST_CHANGES_FOR_FULL_DIFF = 400;
 
@@ -82,41 +85,91 @@ function getStdout(result: Awaited<ReturnType<ExecCommand>>): string {
   return result.stdout;
 }
 
+type DiffAgainstCommands = {
+  list: {
+    command: string;
+    args: string[];
+  };
+  stat: {
+    command: string;
+    args: string[];
+  };
+  diff: {
+    command: string;
+    args: string[];
+  };
+  fileDiff: {
+    command: string;
+    args: string[];
+  };
+};
+
+async function resolveDiffAgainstCommands(
+  commands: DiffAgainstCommands,
+  context: { exec: ExecCommand },
+): Promise<{
+  files: string[];
+  diffStat: string;
+  diffText?: string;
+}> {
+  const [listResult, statResult] = await Promise.all([
+    context.exec(commands.list.command, commands.list.args),
+    context.exec(commands.stat.command, commands.stat.args),
+  ]);
+
+  const files = normalizeGitFileList(getStdout(listResult));
+  const diffStat = getStdout(statResult).trim();
+  let diffText: string | undefined;
+  if (
+    getDiffStatChangeCount(diffStat) <= MAX_DIFF_AGAINST_CHANGES_FOR_FULL_DIFF
+  ) {
+    const diffResult = await context.exec(
+      commands.diff.command,
+      commands.diff.args,
+    );
+    diffText = getStdout(diffResult);
+  }
+
+  return {
+    files,
+    diffStat,
+    ...(diffText !== undefined ? { diffText } : {}),
+  };
+}
+
 export async function resolveReviewTarget(
   target: ReviewTarget,
   context: { exec: ExecCommand },
 ): Promise<ResolvedReviewTarget> {
   if (target.kind === "diff-against") {
     const ref = target.ref.trim();
-    const validation = validateGitRef(ref);
+    const validation = validateDiffRef(ref);
     if (!validation.ok) {
       throw new Error(validation.error);
     }
 
-    const listCommand = buildGitDiffNameOnlyCommand(ref);
-    const statCommand = buildGitDiffStatCommand(ref);
+    const gitCommands: DiffAgainstCommands = {
+      list: buildGitDiffNameOnlyCommand(ref),
+      stat: buildGitDiffStatCommand(ref),
+      diff: buildGitDiffCommand(ref),
+      fileDiff: buildGitDiffForFileCommand(ref, "<file>"),
+    };
 
-    const showDiffCommand = buildGitDiffCommand(ref);
-    const showFileDiffCommand = buildGitDiffForFileCommand(ref, "<file>");
+    const jjCommands: DiffAgainstCommands = {
+      list: buildJjDiffNameOnlyCommand(ref),
+      stat: buildJjDiffStatCommand(ref),
+      diff: buildJjDiffCommand(ref),
+      fileDiff: buildJjDiffForFileCommand(ref, "<file>"),
+    };
 
-    const [listResult, statResult] = await Promise.all([
-      context.exec(listCommand.command, listCommand.args),
-      context.exec(statCommand.command, statCommand.args),
-    ]);
-
-    const files = normalizeGitFileList(getStdout(listResult));
-    const diffStat = getStdout(statResult).trim();
-    const shouldShowDiff =
-      getDiffStatChangeCount(diffStat) <=
-      MAX_DIFF_AGAINST_CHANGES_FOR_FULL_DIFF;
-    let diffText: string | undefined;
-    if (shouldShowDiff) {
-      const diffResult = await context.exec(
-        showDiffCommand.command,
-        showDiffCommand.args,
-      );
-      diffText = getStdout(diffResult);
-    }
+    let commands: DiffAgainstCommands = gitCommands;
+    const resolvedDiff = await resolveDiffAgainstCommands(
+      commands,
+      context,
+    ).catch(async () => {
+      commands = jjCommands;
+      return resolveDiffAgainstCommands(commands, context);
+    });
 
     const resolved: ResolvedDiffAgainstTarget = {
       kind: "diff-against",
@@ -125,24 +178,22 @@ export async function resolveReviewTarget(
       ...(target.reviewContext !== undefined
         ? { reviewContext: target.reviewContext }
         : {}),
-      files,
-      diffStat,
-      ...(diffText !== undefined ? { diffText } : {}),
+      ...resolvedDiff,
       commandHints: [
         commandHint(
           "List changed files",
-          listCommand.command,
-          listCommand.args,
+          commands.list.command,
+          commands.list.args,
         ),
         commandHint(
           "Show full diff",
-          showDiffCommand.command,
-          showDiffCommand.args,
+          commands.diff.command,
+          commands.diff.args,
         ),
         commandHint(
           "Show diff for a file",
-          showFileDiffCommand.command,
-          showFileDiffCommand.args,
+          commands.fileDiff.command,
+          commands.fileDiff.args,
         ),
       ],
     };

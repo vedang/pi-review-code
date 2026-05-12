@@ -6,18 +6,27 @@ import {
   buildGitDiffForFileCommand,
   buildGitDiffNameOnlyCommand,
   buildGitDiffStatCommand,
+  buildJjDiffCommand,
+  buildJjDiffForFileCommand,
+  buildJjDiffNameOnlyCommand,
+  buildJjDiffStatCommand,
   normalizeGitFileList,
-  validateGitRef,
+  validateDiffRef,
 } from "../src/git.js";
 
-test("validateGitRef accepts ordinary branch refs and change ids", () => {
-  assert.equal(validateGitRef("origin/main").ok, true);
-  assert.equal(validateGitRef("feature/review-123").ok, true);
-  assert.equal(validateGitRef("abc123def456").ok, true);
-  assert.equal(validateGitRef("refs/heads/main").ok, true);
+test("validateDiffRef accepts git refs, change ids, and safe jj selectors", () => {
+  assert.equal(validateDiffRef("origin/main").ok, true);
+  assert.equal(validateDiffRef("feature/review-123").ok, true);
+  assert.equal(validateDiffRef("abc123def456").ok, true);
+  assert.equal(validateDiffRef("refs/heads/main").ok, true);
+  assert.equal(validateDiffRef("@").ok, true);
+  assert.equal(validateDiffRef("@-").ok, true);
+  assert.equal(validateDiffRef("@--").ok, true);
+  assert.equal(validateDiffRef("main@origin").ok, true);
+  assert.equal(validateDiffRef("trunk()").ok, true);
 });
 
-test("validateGitRef rejects dangerous or ambiguous refs", () => {
+test("validateDiffRef rejects dangerous or ambiguous refs", () => {
   const rejectedRefs = [
     "",
     "  ",
@@ -30,16 +39,17 @@ test("validateGitRef rejects dangerous or ambiguous refs", () => {
     "two words",
     "../main",
     "main..feature",
+    "present(main)",
   ];
 
   for (const ref of rejectedRefs) {
-    const result = validateGitRef(ref);
+    const result = validateDiffRef(ref);
     assert.equal(result.ok, false, `${JSON.stringify(ref)} should be rejected`);
-    assert.match(result.error, /Invalid git ref/);
+    assert.match(result.error, /Invalid diff ref/);
   }
 });
 
-test("git diff command builders use argument arrays", () => {
+test("git and jj diff command builders use argument arrays", () => {
   assert.deepEqual(buildGitDiffNameOnlyCommand("origin/main"), {
     command: "git",
     args: ["--no-pager", "diff", "origin/main", "--name-only"],
@@ -55,6 +65,22 @@ test("git diff command builders use argument arrays", () => {
   assert.deepEqual(buildGitDiffForFileCommand("origin/main", "src/index.ts"), {
     command: "git",
     args: ["--no-pager", "diff", "origin/main", "--", "src/index.ts"],
+  });
+  assert.deepEqual(buildJjDiffNameOnlyCommand("@-"), {
+    command: "jj",
+    args: ["--no-pager", "diff", "--from", "@-", "--name-only"],
+  });
+  assert.deepEqual(buildJjDiffStatCommand("@-"), {
+    command: "jj",
+    args: ["--no-pager", "diff", "--from", "@-", "--stat"],
+  });
+  assert.deepEqual(buildJjDiffCommand("@-"), {
+    command: "jj",
+    args: ["--no-pager", "diff", "--from", "@-", "--git"],
+  });
+  assert.deepEqual(buildJjDiffForFileCommand("@-", "src/index.ts"), {
+    command: "jj",
+    args: ["--no-pager", "diff", "--from", "@-", "--git", "--", "src/index.ts"],
   });
 });
 

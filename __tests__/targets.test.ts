@@ -84,6 +84,176 @@ test("resolveReviewTarget resolves diff-against with safe command hints", async 
   });
 });
 
+test("resolveReviewTarget falls back to jj diff commands when git diff fails", async () => {
+  const calls: string[] = [];
+  const key = (command: string, args: string[]) =>
+    [command, ...args].join("\0");
+  const gitListCommand = key("git", [
+    "--no-pager",
+    "diff",
+    "@-",
+    "--name-only",
+  ]);
+  const gitStatCommand = key("git", ["--no-pager", "diff", "@-", "--stat"]);
+  const jjListCommand = key("jj", [
+    "--no-pager",
+    "diff",
+    "--from",
+    "@-",
+    "--name-only",
+  ]);
+  const jjStatCommand = key("jj", [
+    "--no-pager",
+    "diff",
+    "--from",
+    "@-",
+    "--stat",
+  ]);
+  const jjDiffCommand = key("jj", [
+    "--no-pager",
+    "diff",
+    "--from",
+    "@-",
+    "--git",
+  ]);
+
+  const target = await resolveReviewTarget(
+    { kind: "diff-against", ref: "@-", targetHint: "@-" },
+    {
+      exec: async (command, args) => {
+        const call = key(command, args);
+        calls.push(call);
+        if (command === "git") {
+          return {
+            stdout: "",
+            stderr: "fatal: not a git repository",
+            exitCode: 128,
+          };
+        }
+        if (call === jjListCommand) {
+          return { stdout: "src/a.ts\n", stderr: "", exitCode: 0 };
+        }
+        if (call === jjStatCommand) {
+          return {
+            stdout: "1 file changed, 1 insertion(+), 0 deletions(-)",
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (call === jjDiffCommand) {
+          return {
+            stdout: "diff --git a/src/a.ts b/src/a.ts\n+change\n",
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      },
+    },
+  );
+
+  assert.equal(target.kind, "diff-against");
+  assert.equal(target.ref, "@-");
+  assert.deepEqual(target.files, ["src/a.ts"]);
+  assert.equal(
+    target.diffStat,
+    "1 file changed, 1 insertion(+), 0 deletions(-)",
+  );
+  assert.equal(target.diffText, "diff --git a/src/a.ts b/src/a.ts\n+change\n");
+  assert.deepEqual(calls.slice(0, 2), [gitListCommand, gitStatCommand]);
+  assert.deepEqual(calls.slice(2), [
+    jjListCommand,
+    jjStatCommand,
+    jjDiffCommand,
+  ]);
+  assert.deepEqual(target.commandHints, [
+    {
+      label: "List changed files",
+      command: "jj",
+      args: ["--no-pager", "diff", "--from", "@-", "--name-only"],
+    },
+    {
+      label: "Show full diff",
+      command: "jj",
+      args: ["--no-pager", "diff", "--from", "@-", "--git"],
+    },
+    {
+      label: "Show diff for a file",
+      command: "jj",
+      args: ["--no-pager", "diff", "--from", "@-", "--git", "--", "<file>"],
+    },
+  ]);
+});
+
+test("resolveReviewTarget falls back to jj when git exec throws", async () => {
+  const calls: string[] = [];
+  const key = (command: string, args: string[]) =>
+    [command, ...args].join("\0");
+  const ref = "trunk()";
+  const jjListCommand = key("jj", [
+    "--no-pager",
+    "diff",
+    "--from",
+    ref,
+    "--name-only",
+  ]);
+  const jjStatCommand = key("jj", [
+    "--no-pager",
+    "diff",
+    "--from",
+    ref,
+    "--stat",
+  ]);
+  const jjDiffCommand = key("jj", [
+    "--no-pager",
+    "diff",
+    "--from",
+    ref,
+    "--git",
+  ]);
+
+  const target = await resolveReviewTarget(
+    { kind: "diff-against", ref, targetHint: ref },
+    {
+      exec: async (command, args) => {
+        const call = key(command, args);
+        calls.push(call);
+        if (command === "git") {
+          throw new Error("spawn git ENOENT");
+        }
+        if (call === jjListCommand) {
+          return { stdout: "src/trunk.ts\n", stderr: "", exitCode: 0 };
+        }
+        if (call === jjStatCommand) {
+          return { stdout: "1 file changed", stderr: "", exitCode: 0 };
+        }
+        if (call === jjDiffCommand) {
+          return {
+            stdout: "diff --git a/src/trunk.ts b/src/trunk.ts\n",
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      },
+    },
+  );
+
+  assert.equal(target.kind, "diff-against");
+  assert.equal(target.ref, ref);
+  assert.deepEqual(target.files, ["src/trunk.ts"]);
+  assert.equal(target.commandHints[0]?.command, "jj");
+  assert.deepEqual(calls.slice(0, 2), [
+    key("git", ["--no-pager", "diff", ref, "--name-only"]),
+    key("git", ["--no-pager", "diff", ref, "--stat"]),
+  ]);
+  assert.deepEqual(calls.slice(2), [
+    jjListCommand,
+    jjStatCommand,
+    jjDiffCommand,
+  ]);
+});
+
 test("resolveReviewTarget skips full diff when diff stat is large", async () => {
   const exec = recordingExec({
     [["git", "--no-pager", "diff", "origin/main", "--name-only"].join("\0")]:
@@ -123,7 +293,7 @@ test("resolveReviewTarget rejects unsafe diff refs before exec", async () => {
           },
         },
       ),
-    /Invalid git ref/,
+    /Invalid diff ref/,
   );
   assert.equal(called, false);
 });

@@ -17,11 +17,11 @@ import type {
   PiReviewThinkingLevel,
   ReviewPromptDraftGenerationResult,
 } from "./draft.js";
-import { buildReviewFixPrompt } from "./prompts.js";
 import type {
   ReviewPromptDraftOptions,
   ReviewPromptDraftRequest,
 } from "./prompts.js";
+import { buildReviewFixPrompt } from "./prompts.js";
 import type {
   ReviewFixWidgetConfig,
   ReviewFixWidgetResult,

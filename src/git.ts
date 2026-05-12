@@ -8,60 +8,58 @@ export type RefValidationResult =
     };
 
 const DANGEROUS_REF_CHARACTERS = /[\s\0;&|`$<>]/;
-const REF_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const REF_SEGMENT_PATTERN = /^[A-Za-z0-9@][A-Za-z0-9._@+-]*$/;
+const JJ_SYMBOLIC_REVSET_PATTERN = /^@[-+]*$/;
+const JJ_EMPTY_FUNCTION_REVSET_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*\(\)$/;
+
+function invalidDiffRef(reason: string): RefValidationResult {
+  return {
+    ok: false,
+    error: `Invalid diff ref: ${reason}.`,
+  };
+}
 
 function normalizeAndValidateRefValue(ref: string): RefValidationResult {
   const trimmedRef = ref.trim();
 
   if (trimmedRef.length === 0) {
-    return {
-      ok: false,
-      error: "Invalid git ref: ref must be non-empty.",
-    };
+    return invalidDiffRef("ref must be non-empty");
   }
 
   if (trimmedRef.includes("..")) {
-    return {
-      ok: false,
-      error: "Invalid git ref: ref must not contain '..'.",
-    };
+    return invalidDiffRef("ref must not contain '..'");
   }
 
   if (DANGEROUS_REF_CHARACTERS.test(trimmedRef)) {
-    return {
-      ok: false,
-      error: "Invalid git ref: ref contains unsafe characters.",
-    };
+    return invalidDiffRef("ref contains unsafe characters");
+  }
+
+  if (
+    JJ_SYMBOLIC_REVSET_PATTERN.test(trimmedRef) ||
+    JJ_EMPTY_FUNCTION_REVSET_PATTERN.test(trimmedRef)
+  ) {
+    return { ok: true };
   }
 
   const segments = trimmedRef.split("/");
   for (const segment of segments) {
     if (segment.length === 0) {
-      return {
-        ok: false,
-        error: "Invalid git ref: ref has invalid path component.",
-      };
+      return invalidDiffRef("ref has invalid path component");
     }
 
     if (segment === "." || segment === "..") {
-      return {
-        ok: false,
-        error: "Invalid git ref: ref contains path traversal.",
-      };
+      return invalidDiffRef("ref contains path traversal");
     }
 
     if (!REF_SEGMENT_PATTERN.test(segment)) {
-      return {
-        ok: false,
-        error: "Invalid git ref: ref has invalid character.",
-      };
+      return invalidDiffRef("ref has invalid character");
     }
   }
 
   return { ok: true };
 }
 
-export function validateGitRef(ref: string): RefValidationResult {
+export function validateDiffRef(ref: string): RefValidationResult {
   return normalizeAndValidateRefValue(ref);
 }
 
@@ -75,6 +73,16 @@ export function buildGitDiffNameOnlyCommand(ref: string): {
   };
 }
 
+export function buildJjDiffNameOnlyCommand(ref: string): {
+  command: "jj";
+  args: string[];
+} {
+  return {
+    command: "jj",
+    args: ["--no-pager", "diff", "--from", ref, "--name-only"],
+  };
+}
+
 export function buildGitDiffStatCommand(ref: string): {
   command: "git";
   args: string[];
@@ -82,6 +90,16 @@ export function buildGitDiffStatCommand(ref: string): {
   return {
     command: "git",
     args: ["--no-pager", "diff", ref, "--stat"],
+  };
+}
+
+export function buildJjDiffStatCommand(ref: string): {
+  command: "jj";
+  args: string[];
+} {
+  return {
+    command: "jj",
+    args: ["--no-pager", "diff", "--from", ref, "--stat"],
   };
 }
 
@@ -95,6 +113,16 @@ export function buildGitDiffCommand(ref: string): {
   };
 }
 
+export function buildJjDiffCommand(ref: string): {
+  command: "jj";
+  args: string[];
+} {
+  return {
+    command: "jj",
+    args: ["--no-pager", "diff", "--from", ref, "--git"],
+  };
+}
+
 export function buildGitDiffForFileCommand(
   ref: string,
   filePath: string,
@@ -105,6 +133,19 @@ export function buildGitDiffForFileCommand(
   return {
     command: "git",
     args: ["--no-pager", "diff", ref, "--", filePath],
+  };
+}
+
+export function buildJjDiffForFileCommand(
+  ref: string,
+  filePath: string,
+): {
+  command: "jj";
+  args: string[];
+} {
+  return {
+    command: "jj",
+    args: ["--no-pager", "diff", "--from", ref, "--git", "--", filePath],
   };
 }
 

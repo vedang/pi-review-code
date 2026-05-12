@@ -55,7 +55,7 @@ pi-review() { pi "/review $*"; }
 Start any review from one widget. Choose review type, then fill target plus optional context:
 
 - Free-form request: describe code, behavior, or risk to review.
-- Diff against ref: enter a git ref or change id. Prompt drafts include changed files, diff stats, and safe command hints such as `git --no-pager diff <ref>`.
+- Diff against ref: enter a git ref, jj change id/revset (for example `@-` or `trunk()`), or compatible base name. Prompt drafts include changed files, diff stats, and safe command hints. The extension tries `git diff` first, then falls back to `jj diff` when git is unavailable in a jj workspace.
 - PR/MR: enter a GitHub URL, GitLab URL, MR URL, or PR number. PR/MR reviews use `gh`/`glab` metadata and diff commands without checking out or switching VCS branches.
 
 ```text
