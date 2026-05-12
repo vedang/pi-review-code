@@ -54,22 +54,22 @@ test("git and jj diff command builders use argument arrays", () => {
     [
       buildGitDiffNameOnlyCommand("origin/main"),
       "git",
-      ["--no-pager", "diff", "origin/main", "--name-only"],
+      ["--no-pager", "diff", "origin/main...HEAD", "--name-only"],
     ],
     [
       buildGitDiffStatCommand("origin/main"),
       "git",
-      ["--no-pager", "diff", "origin/main", "--stat"],
+      ["--no-pager", "diff", "origin/main...HEAD", "--stat"],
     ],
     [
       buildGitDiffCommand("origin/main"),
       "git",
-      ["--no-pager", "diff", "origin/main"],
+      ["--no-pager", "diff", "origin/main...HEAD"],
     ],
     [
       buildGitDiffForFileCommand("origin/main", "src/index.ts"),
       "git",
-      ["--no-pager", "diff", "origin/main", "--", "src/index.ts"],
+      ["--no-pager", "diff", "origin/main...HEAD", "--", "src/index.ts"],
     ],
     [
       buildJjDiffNameOnlyCommand("@-"),

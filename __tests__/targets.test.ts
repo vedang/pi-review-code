@@ -9,7 +9,7 @@ function commandKey(command: string, args: string[]): string {
 }
 
 function gitDiffKey(ref: string, ...args: string[]): string {
-  return commandKey("git", ["--no-pager", "diff", ref, ...args]);
+  return commandKey("git", ["--no-pager", "diff", `${ref}...HEAD`, ...args]);
 }
 
 function jjDiffKey(ref: string, ...args: string[]): string {
@@ -77,17 +77,17 @@ test("resolveReviewTarget resolves diff-against with safe command hints", async 
       {
         label: "List changed files",
         command: "git",
-        args: ["--no-pager", "diff", "origin/main", "--name-only"],
+        args: ["--no-pager", "diff", "origin/main...HEAD", "--name-only"],
       },
       {
         label: "Show full diff",
         command: "git",
-        args: ["--no-pager", "diff", "origin/main"],
+        args: ["--no-pager", "diff", "origin/main...HEAD"],
       },
       {
         label: "Show diff for a file",
         command: "git",
-        args: ["--no-pager", "diff", "origin/main", "--", "<file>"],
+        args: ["--no-pager", "diff", "origin/main...HEAD", "--", "<file>"],
       },
     ],
   });

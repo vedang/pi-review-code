@@ -581,7 +581,7 @@ test("review flow passes resolved diff text to prompt draft builder", async () =
       {
         label: "Show full diff",
         command: "git",
-        args: ["--no-pager", "diff", "origin/main"],
+        args: ["--no-pager", "diff", "origin/main...HEAD"],
       },
     ],
   };

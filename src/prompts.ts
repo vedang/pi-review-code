@@ -88,6 +88,10 @@ function buildDiffReviewBlock(
   const parts = [
     `Target type: ${target.kind}`,
     `Target hint: ${target.targetHint}`,
+    "Review only changes introduced by the PR source branch.",
+    `Do not use \`git diff ${target.ref}\` or \`git diff ${target.ref}..HEAD\`.`,
+    "If the branch is behind the base, ignore reverse changes from missing target-branch commits.",
+    "Scope findings only to lines present in the merge-base-to-HEAD diff.",
     `Files changed (${target.files.length}):`,
     ...target.files.map((path) => `- ${path}`),
     `Diff stat: ${target.diffStat}`,

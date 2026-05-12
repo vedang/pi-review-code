@@ -72,7 +72,7 @@ function gitDiff(
 } {
   return {
     command: "git",
-    args: ["--no-pager", "diff", ref, ...args],
+    args: ["--no-pager", "diff", `${ref}...HEAD`, ...args],
   };
 }
 

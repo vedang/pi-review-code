@@ -39,17 +39,17 @@ function diffTarget(): ResolvedReviewTarget {
       {
         label: "List changed files",
         command: "git",
-        args: ["--no-pager", "diff", "origin/main", "--name-only"],
+        args: ["--no-pager", "diff", "origin/main...HEAD", "--name-only"],
       },
       {
         label: "Show full diff",
         command: "git",
-        args: ["--no-pager", "diff", "origin/main"],
+        args: ["--no-pager", "diff", "origin/main...HEAD"],
       },
       {
         label: "Show diff for a file",
         command: "git",
-        args: ["--no-pager", "diff", "origin/main", "--", "<file>"],
+        args: ["--no-pager", "diff", "origin/main...HEAD", "--", "<file>"],
       },
     ],
   };
@@ -102,11 +102,19 @@ test("buildReviewPromptDraftRequest embeds small diffs with rubric and tool inst
   assert.match(request.userPrompt, /2 files changed, 20 insertions/);
   assert.match(
     request.userPrompt,
-    /`git --no-pager diff origin\/main --name-only`/,
+    /Review only changes introduced by the PR source branch\./,
   );
   assert.match(
     request.userPrompt,
-    /`git --no-pager diff origin\/main -- '<file>'`/,
+    /Do not use `git diff origin\/main` or `git diff origin\/main\.\.HEAD`\./,
+  );
+  assert.match(
+    request.userPrompt,
+    /`git --no-pager diff origin\/main\.\.\.HEAD --name-only`/,
+  );
+  assert.match(
+    request.userPrompt,
+    /`git --no-pager diff origin\/main\.\.\.HEAD -- '<file>'`/,
   );
   assert.match(request.userPrompt, /diff --git a\/src\/auth\.ts/);
   assert.match(request.userPrompt, /add_review_comment/);
@@ -133,7 +141,10 @@ test("buildReviewPromptDraftRequest switches large diffs to command-guided revie
   assert.doesNotMatch(request.userPrompt, new RegExp(largeDiff));
   assert.match(request.userPrompt, /Diff too large to embed/);
   assert.match(request.userPrompt, /Use the command hints/);
-  assert.match(request.userPrompt, /`git --no-pager diff origin\/main`/);
+  assert.match(
+    request.userPrompt,
+    /`git --no-pager diff origin\/main\.\.\.HEAD`/,
+  );
 });
 
 test("buildReviewPromptDraftRequest shell-quotes unsafe command hint args", () => {

@@ -55,7 +55,7 @@ pi-review() { pi "/review $*"; }
 Start any review from one widget. Choose review type, then fill target plus optional context:
 
 - Free-form request: describe code, behavior, or risk to review.
-- Diff against ref: enter a git ref, jj change id/revset (for example `@-` or `trunk()`), or compatible base name. The extension tries `git diff` first, then falls back to `jj diff` when git is unavailable in a jj workspace. Prompt drafts include changed files, diff stats, and safe command hints for the backend used.
+- Diff against ref: enter a git ref, jj change id/revset (for example `@-` or `trunk()`), or compatible base name. For git targets, the extension runs `git diff <base>...HEAD` first (`--name-only`, `--stat`, and file diff forms), then falls back to `jj diff` in jj workspaces when git is unavailable. Prompt drafts include changed files, diff stats, and safe command hints for the backend used.
 - PR/MR: enter a GitHub URL, GitLab URL, MR URL, or PR number. PR/MR reviews use `gh`/`glab` metadata and diff commands without checking out or switching VCS branches.
 
 ```text
@@ -73,6 +73,15 @@ Typed arguments prefill the target field. PR/MR URLs and number-only selectors a
 /review pr https://github.com/owner/repo/pull/123
 /review mr 123
 ```
+
+Useful manual review commands for git-backed targets:
+
+- `git --no-pager diff <base>...HEAD` — full PR-source diff
+- `git --no-pager diff <base>...HEAD --name-only` — file list
+- `git --no-pager diff <base>...HEAD --stat` — change summary
+- `git --no-pager diff <base>...HEAD -- '<file>'` — per-file inspection
+
+Avoid `git diff <base>` and `git diff <base>..HEAD` for review; these can include reverse changes when the source branch is behind its base.
 
 ### `/review-fix`
 
