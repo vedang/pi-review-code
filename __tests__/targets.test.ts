@@ -4,9 +4,21 @@ import test from "node:test";
 import { resolveReviewTarget } from "../src/targets.js";
 import type { ExecCommand } from "../src/types.js";
 
+function commandKey(command: string, args: string[]): string {
+  return [command, ...args].join("\0");
+}
+
+function gitDiffKey(ref: string, ...args: string[]): string {
+  return commandKey("git", ["--no-pager", "diff", ref, ...args]);
+}
+
+function jjDiffKey(ref: string, ...args: string[]): string {
+  return commandKey("jj", ["--no-pager", "diff", "--from", ref, ...args]);
+}
+
 function fakeExec(responses: Record<string, string>): ExecCommand {
   return async (command, args) => {
-    const key = [command, ...args].join("\0");
+    const key = commandKey(command, args);
     const stdout = responses[key];
     if (stdout === undefined) {
       throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
@@ -24,7 +36,7 @@ function recordingExec(responses: Record<string, string>): {
   return {
     calls,
     exec: async (command, args) => {
-      const key = [command, ...args].join("\0");
+      const key = commandKey(command, args);
       calls.push(key);
       const stdout = responses[key];
       if (stdout === undefined) {
@@ -45,12 +57,9 @@ test("resolveReviewTarget resolves diff-against with safe command hints", async 
     },
     {
       exec: fakeExec({
-        [["git", "--no-pager", "diff", "origin/main", "--name-only"].join(
-          "\0",
-        )]: "src/a.ts\nsrc/b.ts\n",
-        [["git", "--no-pager", "diff", "origin/main", "--stat"].join("\0")]:
-          " 2 files changed",
-        [["git", "--no-pager", "diff", "origin/main"].join("\0")]:
+        [gitDiffKey("origin/main", "--name-only")]: "src/a.ts\nsrc/b.ts\n",
+        [gitDiffKey("origin/main", "--stat")]: " 2 files changed",
+        [gitDiffKey("origin/main")]:
           "diff --git a/src/a.ts b/src/a.ts\n+change\n",
       }),
     },
@@ -84,181 +93,102 @@ test("resolveReviewTarget resolves diff-against with safe command hints", async 
   });
 });
 
-test("resolveReviewTarget falls back to jj diff commands when git diff fails", async () => {
-  const calls: string[] = [];
-  const key = (command: string, args: string[]) =>
-    [command, ...args].join("\0");
-  const gitListCommand = key("git", [
-    "--no-pager",
-    "diff",
-    "@-",
-    "--name-only",
-  ]);
-  const gitStatCommand = key("git", ["--no-pager", "diff", "@-", "--stat"]);
-  const jjListCommand = key("jj", [
-    "--no-pager",
-    "diff",
-    "--from",
-    "@-",
-    "--name-only",
-  ]);
-  const jjStatCommand = key("jj", [
-    "--no-pager",
-    "diff",
-    "--from",
-    "@-",
-    "--stat",
-  ]);
-  const jjDiffCommand = key("jj", [
-    "--no-pager",
-    "diff",
-    "--from",
-    "@-",
-    "--git",
-  ]);
+for (const scenario of [
+  { name: "when git exits nonzero", ref: "@-", filePath: "src/a.ts" },
+  { name: "when git exec throws", ref: "trunk()", filePath: "src/trunk.ts" },
+] as const) {
+  test(`resolveReviewTarget falls back to jj ${scenario.name}`, async () => {
+    const calls: string[] = [];
+    const gitListCommand = gitDiffKey(scenario.ref, "--name-only");
+    const gitStatCommand = gitDiffKey(scenario.ref, "--stat");
+    const jjListCommand = jjDiffKey(scenario.ref, "--name-only");
+    const jjStatCommand = jjDiffKey(scenario.ref, "--stat");
+    const jjDiffCommand = jjDiffKey(scenario.ref, "--git");
 
-  const target = await resolveReviewTarget(
-    { kind: "diff-against", ref: "@-", targetHint: "@-" },
-    {
-      exec: async (command, args) => {
-        const call = key(command, args);
-        calls.push(call);
-        if (command === "git") {
-          return {
-            stdout: "",
-            stderr: "fatal: not a git repository",
-            exitCode: 128,
-          };
-        }
-        if (call === jjListCommand) {
-          return { stdout: "src/a.ts\n", stderr: "", exitCode: 0 };
-        }
-        if (call === jjStatCommand) {
-          return {
-            stdout: "1 file changed, 1 insertion(+), 0 deletions(-)",
-            stderr: "",
-            exitCode: 0,
-          };
-        }
-        if (call === jjDiffCommand) {
-          return {
-            stdout: "diff --git a/src/a.ts b/src/a.ts\n+change\n",
-            stderr: "",
-            exitCode: 0,
-          };
-        }
-        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    const target = await resolveReviewTarget(
+      { kind: "diff-against", ref: scenario.ref, targetHint: scenario.ref },
+      {
+        exec: async (command, args) => {
+          const call = commandKey(command, args);
+          calls.push(call);
+          if (command === "git") {
+            if (scenario.name === "when git exec throws") {
+              throw new Error("spawn git ENOENT");
+            }
+            return {
+              stdout: "",
+              stderr: "fatal: not a git repository",
+              exitCode: 128,
+            };
+          }
+          if (call === jjListCommand) {
+            return {
+              stdout: `${scenario.filePath}\n`,
+              stderr: "",
+              exitCode: 0,
+            };
+          }
+          if (call === jjStatCommand) {
+            return { stdout: "1 file changed", stderr: "", exitCode: 0 };
+          }
+          if (call === jjDiffCommand) {
+            return {
+              stdout: `diff --git a/${scenario.filePath} b/${scenario.filePath}\n`,
+              stderr: "",
+              exitCode: 0,
+            };
+          }
+          throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+        },
       },
-    },
-  );
+    );
 
-  assert.equal(target.kind, "diff-against");
-  assert.equal(target.ref, "@-");
-  assert.deepEqual(target.files, ["src/a.ts"]);
-  assert.equal(
-    target.diffStat,
-    "1 file changed, 1 insertion(+), 0 deletions(-)",
-  );
-  assert.equal(target.diffText, "diff --git a/src/a.ts b/src/a.ts\n+change\n");
-  assert.deepEqual(calls.slice(0, 2), [gitListCommand, gitStatCommand]);
-  assert.deepEqual(calls.slice(2), [
-    jjListCommand,
-    jjStatCommand,
-    jjDiffCommand,
-  ]);
-  assert.deepEqual(target.commandHints, [
-    {
-      label: "List changed files",
-      command: "jj",
-      args: ["--no-pager", "diff", "--from", "@-", "--name-only"],
-    },
-    {
-      label: "Show full diff",
-      command: "jj",
-      args: ["--no-pager", "diff", "--from", "@-", "--git"],
-    },
-    {
-      label: "Show diff for a file",
-      command: "jj",
-      args: ["--no-pager", "diff", "--from", "@-", "--git", "--", "<file>"],
-    },
-  ]);
-});
-
-test("resolveReviewTarget falls back to jj when git exec throws", async () => {
-  const calls: string[] = [];
-  const key = (command: string, args: string[]) =>
-    [command, ...args].join("\0");
-  const ref = "trunk()";
-  const jjListCommand = key("jj", [
-    "--no-pager",
-    "diff",
-    "--from",
-    ref,
-    "--name-only",
-  ]);
-  const jjStatCommand = key("jj", [
-    "--no-pager",
-    "diff",
-    "--from",
-    ref,
-    "--stat",
-  ]);
-  const jjDiffCommand = key("jj", [
-    "--no-pager",
-    "diff",
-    "--from",
-    ref,
-    "--git",
-  ]);
-
-  const target = await resolveReviewTarget(
-    { kind: "diff-against", ref, targetHint: ref },
-    {
-      exec: async (command, args) => {
-        const call = key(command, args);
-        calls.push(call);
-        if (command === "git") {
-          throw new Error("spawn git ENOENT");
-        }
-        if (call === jjListCommand) {
-          return { stdout: "src/trunk.ts\n", stderr: "", exitCode: 0 };
-        }
-        if (call === jjStatCommand) {
-          return { stdout: "1 file changed", stderr: "", exitCode: 0 };
-        }
-        if (call === jjDiffCommand) {
-          return {
-            stdout: "diff --git a/src/trunk.ts b/src/trunk.ts\n",
-            stderr: "",
-            exitCode: 0,
-          };
-        }
-        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    assert.equal(target.kind, "diff-against");
+    assert.equal(target.ref, scenario.ref);
+    assert.deepEqual(target.files, [scenario.filePath]);
+    assert.equal(target.diffStat, "1 file changed");
+    assert.equal(
+      target.diffText,
+      `diff --git a/${scenario.filePath} b/${scenario.filePath}\n`,
+    );
+    assert.deepEqual(calls.slice(0, 2), [gitListCommand, gitStatCommand]);
+    assert.deepEqual(calls.slice(2), [
+      jjListCommand,
+      jjStatCommand,
+      jjDiffCommand,
+    ]);
+    assert.deepEqual(target.commandHints, [
+      {
+        label: "List changed files",
+        command: "jj",
+        args: ["--no-pager", "diff", "--from", scenario.ref, "--name-only"],
       },
-    },
-  );
-
-  assert.equal(target.kind, "diff-against");
-  assert.equal(target.ref, ref);
-  assert.deepEqual(target.files, ["src/trunk.ts"]);
-  assert.equal(target.commandHints[0]?.command, "jj");
-  assert.deepEqual(calls.slice(0, 2), [
-    key("git", ["--no-pager", "diff", ref, "--name-only"]),
-    key("git", ["--no-pager", "diff", ref, "--stat"]),
-  ]);
-  assert.deepEqual(calls.slice(2), [
-    jjListCommand,
-    jjStatCommand,
-    jjDiffCommand,
-  ]);
-});
+      {
+        label: "Show full diff",
+        command: "jj",
+        args: ["--no-pager", "diff", "--from", scenario.ref, "--git"],
+      },
+      {
+        label: "Show diff for a file",
+        command: "jj",
+        args: [
+          "--no-pager",
+          "diff",
+          "--from",
+          scenario.ref,
+          "--git",
+          "--",
+          "<file>",
+        ],
+      },
+    ]);
+  });
+}
 
 test("resolveReviewTarget skips full diff when diff stat is large", async () => {
   const exec = recordingExec({
-    [["git", "--no-pager", "diff", "origin/main", "--name-only"].join("\0")]:
-      "src/huge.ts\n",
-    [["git", "--no-pager", "diff", "origin/main", "--stat"].join("\0")]:
+    [gitDiffKey("origin/main", "--name-only")]: "src/huge.ts\n",
+    [gitDiffKey("origin/main", "--stat")]:
       " src/huge.ts | 10000 +++++++++++++++++++++++++++++++++++++\n 1 file changed, 10000 insertions(+)",
   });
 
@@ -271,8 +201,8 @@ test("resolveReviewTarget skips full diff when diff stat is large", async () => 
   assert.deepEqual(target.files, ["src/huge.ts"]);
   assert.equal("diffText" in target, false);
   assert.deepEqual(exec.calls, [
-    ["git", "--no-pager", "diff", "origin/main", "--name-only"].join("\0"),
-    ["git", "--no-pager", "diff", "origin/main", "--stat"].join("\0"),
+    gitDiffKey("origin/main", "--name-only"),
+    gitDiffKey("origin/main", "--stat"),
   ]);
 });
 

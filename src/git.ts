@@ -19,7 +19,7 @@ function invalidDiffRef(reason: string): RefValidationResult {
   };
 }
 
-function normalizeAndValidateRefValue(ref: string): RefValidationResult {
+function validateDiffRefValue(ref: string): RefValidationResult {
   const trimmedRef = ref.trim();
 
   if (trimmedRef.length === 0) {
@@ -60,67 +60,75 @@ function normalizeAndValidateRefValue(ref: string): RefValidationResult {
 }
 
 export function validateDiffRef(ref: string): RefValidationResult {
-  return normalizeAndValidateRefValue(ref);
+  return validateDiffRefValue(ref);
+}
+
+function gitDiff(
+  ref: string,
+  ...args: string[]
+): {
+  command: "git";
+  args: string[];
+} {
+  return {
+    command: "git",
+    args: ["--no-pager", "diff", ref, ...args],
+  };
+}
+
+function jjDiff(
+  ref: string,
+  ...args: string[]
+): {
+  command: "jj";
+  args: string[];
+} {
+  return {
+    command: "jj",
+    args: ["--no-pager", "diff", "--from", ref, ...args],
+  };
 }
 
 export function buildGitDiffNameOnlyCommand(ref: string): {
   command: "git";
   args: string[];
 } {
-  return {
-    command: "git",
-    args: ["--no-pager", "diff", ref, "--name-only"],
-  };
+  return gitDiff(ref, "--name-only");
 }
 
 export function buildJjDiffNameOnlyCommand(ref: string): {
   command: "jj";
   args: string[];
 } {
-  return {
-    command: "jj",
-    args: ["--no-pager", "diff", "--from", ref, "--name-only"],
-  };
+  return jjDiff(ref, "--name-only");
 }
 
 export function buildGitDiffStatCommand(ref: string): {
   command: "git";
   args: string[];
 } {
-  return {
-    command: "git",
-    args: ["--no-pager", "diff", ref, "--stat"],
-  };
+  return gitDiff(ref, "--stat");
 }
 
 export function buildJjDiffStatCommand(ref: string): {
   command: "jj";
   args: string[];
 } {
-  return {
-    command: "jj",
-    args: ["--no-pager", "diff", "--from", ref, "--stat"],
-  };
+  return jjDiff(ref, "--stat");
 }
 
 export function buildGitDiffCommand(ref: string): {
   command: "git";
   args: string[];
 } {
-  return {
-    command: "git",
-    args: ["--no-pager", "diff", ref],
-  };
+  return gitDiff(ref);
 }
 
 export function buildJjDiffCommand(ref: string): {
   command: "jj";
   args: string[];
 } {
-  return {
-    command: "jj",
-    args: ["--no-pager", "diff", "--from", ref, "--git"],
-  };
+  return jjDiff(ref, "--git");
 }
 
 export function buildGitDiffForFileCommand(
@@ -130,10 +138,7 @@ export function buildGitDiffForFileCommand(
   command: "git";
   args: string[];
 } {
-  return {
-    command: "git",
-    args: ["--no-pager", "diff", ref, "--", filePath],
-  };
+  return gitDiff(ref, "--", filePath);
 }
 
 export function buildJjDiffForFileCommand(
@@ -143,10 +148,7 @@ export function buildJjDiffForFileCommand(
   command: "jj";
   args: string[];
 } {
-  return {
-    command: "jj",
-    args: ["--no-pager", "diff", "--from", ref, "--git", "--", filePath],
-  };
+  return jjDiff(ref, "--git", "--", filePath);
 }
 
 export function normalizeGitFileList(raw: string): string[] {

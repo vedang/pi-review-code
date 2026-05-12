@@ -50,38 +50,52 @@ test("validateDiffRef rejects dangerous or ambiguous refs", () => {
 });
 
 test("git and jj diff command builders use argument arrays", () => {
-  assert.deepEqual(buildGitDiffNameOnlyCommand("origin/main"), {
-    command: "git",
-    args: ["--no-pager", "diff", "origin/main", "--name-only"],
-  });
-  assert.deepEqual(buildGitDiffStatCommand("origin/main"), {
-    command: "git",
-    args: ["--no-pager", "diff", "origin/main", "--stat"],
-  });
-  assert.deepEqual(buildGitDiffCommand("origin/main"), {
-    command: "git",
-    args: ["--no-pager", "diff", "origin/main"],
-  });
-  assert.deepEqual(buildGitDiffForFileCommand("origin/main", "src/index.ts"), {
-    command: "git",
-    args: ["--no-pager", "diff", "origin/main", "--", "src/index.ts"],
-  });
-  assert.deepEqual(buildJjDiffNameOnlyCommand("@-"), {
-    command: "jj",
-    args: ["--no-pager", "diff", "--from", "@-", "--name-only"],
-  });
-  assert.deepEqual(buildJjDiffStatCommand("@-"), {
-    command: "jj",
-    args: ["--no-pager", "diff", "--from", "@-", "--stat"],
-  });
-  assert.deepEqual(buildJjDiffCommand("@-"), {
-    command: "jj",
-    args: ["--no-pager", "diff", "--from", "@-", "--git"],
-  });
-  assert.deepEqual(buildJjDiffForFileCommand("@-", "src/index.ts"), {
-    command: "jj",
-    args: ["--no-pager", "diff", "--from", "@-", "--git", "--", "src/index.ts"],
-  });
+  const cases = [
+    [
+      buildGitDiffNameOnlyCommand("origin/main"),
+      "git",
+      ["--no-pager", "diff", "origin/main", "--name-only"],
+    ],
+    [
+      buildGitDiffStatCommand("origin/main"),
+      "git",
+      ["--no-pager", "diff", "origin/main", "--stat"],
+    ],
+    [
+      buildGitDiffCommand("origin/main"),
+      "git",
+      ["--no-pager", "diff", "origin/main"],
+    ],
+    [
+      buildGitDiffForFileCommand("origin/main", "src/index.ts"),
+      "git",
+      ["--no-pager", "diff", "origin/main", "--", "src/index.ts"],
+    ],
+    [
+      buildJjDiffNameOnlyCommand("@-"),
+      "jj",
+      ["--no-pager", "diff", "--from", "@-", "--name-only"],
+    ],
+    [
+      buildJjDiffStatCommand("@-"),
+      "jj",
+      ["--no-pager", "diff", "--from", "@-", "--stat"],
+    ],
+    [
+      buildJjDiffCommand("@-"),
+      "jj",
+      ["--no-pager", "diff", "--from", "@-", "--git"],
+    ],
+    [
+      buildJjDiffForFileCommand("@-", "src/index.ts"),
+      "jj",
+      ["--no-pager", "diff", "--from", "@-", "--git", "--", "src/index.ts"],
+    ],
+  ] as const;
+
+  for (const [actual, command, args] of cases) {
+    assert.deepEqual(actual, { command, args: [...args] });
+  }
 });
 
 test("normalizeGitFileList trims empty diff output lines", () => {
