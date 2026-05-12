@@ -83,6 +83,14 @@ Useful manual review commands for git-backed targets:
 
 Avoid `git diff <base>` and `git diff <base>..HEAD` for review; these can include reverse changes when the source branch is behind its base.
 
+### Repository review guidelines
+
+If `REVIEW_GUIDELINES.md` exists in the current working directory, `/review` reads it and includes the trimmed content in the review prompt draft context. Use it for repo-specific rules such as required test coverage, naming conventions, complexity limits, docstring expectations, or language-specific review checks.
+
+Guidelines are sent to the selected model as part of the draft prompt. Keep them concise and do not include secrets. For safety, the extension rejects symlinks, non-regular files, and files larger than 64 KiB.
+
+Example templates live in `guidelines_examples/python.md` and `guidelines_examples/typescript.md`; copy or adapt one into `REVIEW_GUIDELINES.md` for a project.
+
 ### `/review-fix`
 
 Select unfixed findings from completed reviews, optionally add fix context, then start a same-session fix branch.

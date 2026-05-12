@@ -59,6 +59,8 @@ type HarnessOptions = {
   draftOk?: boolean;
   navigateResults?: Array<{ cancelled: boolean } | Error>;
   target?: ResolvedReviewTarget;
+  reviewGuidelines?: string;
+  reviewGuidelinesError?: Error;
   initialLeafId?: string | null;
   anchorLeafId?: string;
   inputWidgetResult?: InputWidgetResult;
@@ -86,6 +88,7 @@ function createHarness(options: HarnessOptions = {}) {
   const resolvedTargets: unknown[] = [];
   const draftRequests: unknown[] = [];
   const draftOptions: unknown[] = [];
+  const reviewGuidelineReads: number[] = [];
 
   const target = options.target ?? promptTarget();
   const draftOk = options.draftOk ?? true;
@@ -137,6 +140,13 @@ function createHarness(options: HarnessOptions = {}) {
       draftRequests.push(resolvedTarget);
       draftOptions.push(options);
       return { systemPrompt: "system", userPrompt: "packet" };
+    },
+    readReviewGuidelines: async () => {
+      reviewGuidelineReads.push(1);
+      if (options.reviewGuidelinesError !== undefined) {
+        throw options.reviewGuidelinesError;
+      }
+      return options.reviewGuidelines;
     },
     generateDraft: async (request) => {
       assert.deepEqual(request, {
@@ -215,6 +225,7 @@ function createHarness(options: HarnessOptions = {}) {
     resolvedTargets,
     draftRequests,
     draftOptions,
+    reviewGuidelineReads,
   };
 }
 
@@ -600,6 +611,42 @@ test("review flow passes resolved diff text to prompt draft builder", async () =
   assert.deepEqual(harness.draftRequests, [target]);
   assert.deepEqual(harness.draftOptions, [
     { diffText: "diff --git a/src/auth.ts b/src/auth.ts\n+rotateToken();" },
+  ]);
+});
+
+test("review flow passes REVIEW_GUIDELINES.md content to prompt draft builder", async () => {
+  const harness = createHarness({
+    editorResult: "Edited prompt",
+    reviewGuidelines: "Require tests for changed behavior.",
+  });
+
+  await harness.controller.handleReviewCommand(
+    "review auth boundaries",
+    harness.ctx,
+  );
+
+  assert.deepEqual(harness.reviewGuidelineReads, [1]);
+  assert.deepEqual(harness.draftOptions, [
+    { reviewGuidelines: "Require tests for changed behavior." },
+  ]);
+});
+
+test("review flow aborts when repository guidelines cannot be read", async () => {
+  const harness = createHarness({
+    editorResult: "Edited prompt",
+    reviewGuidelinesError: new Error("REVIEW_GUIDELINES.md is too large"),
+  });
+
+  await harness.controller.handleReviewCommand(
+    "review auth boundaries",
+    harness.ctx,
+  );
+
+  assert.deepEqual(harness.reviewGuidelineReads, [1]);
+  assert.deepEqual(harness.draftRequests, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.deepEqual(harness.notifications, [
+    { message: "REVIEW_GUIDELINES.md is too large", level: "error" },
   ]);
 });
 

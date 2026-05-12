@@ -13,6 +13,7 @@ import {
   generateReviewPromptDraft,
 } from "./draft.js";
 import { createReviewFlowController } from "./flow.js";
+import { readReviewGuidelinesFromCwd } from "./guidelines.js";
 import { buildReviewPromptDraftRequest } from "./prompts.js";
 import { registerReviewMessageRenderers } from "./renderers.js";
 import { showReviewFixWidget } from "./review-fix-widget.js";
@@ -161,6 +162,7 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
         },
       }),
     buildDraftRequest: buildReviewPromptDraftRequest,
+    readReviewGuidelines: () => readReviewGuidelinesFromCwd(),
     generateDraft: (request, context) =>
       generateReviewPromptDraft(request, {
         completeDraft: (draftRequest) =>

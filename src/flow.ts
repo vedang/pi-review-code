@@ -734,6 +734,7 @@ type ReviewFlowDependencies = {
     target: ResolvedReviewTarget,
     options?: ReviewPromptDraftOptions,
   ) => ReviewPromptDraftRequest;
+  readReviewGuidelines?: () => Promise<string | undefined>;
   generateDraft: GenerateDraft;
   getCommentsForRun: GetCommentsForRun;
   getThinkingLevel: () => PiReviewThinkingLevel;
@@ -880,6 +881,11 @@ function sendSummaryMessage(
   });
 }
 
+function normalizeOptionalText(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+}
+
 export function createReviewFlowController(
   dependencies: ReviewFlowDependencies,
 ): ReviewFlowController {
@@ -920,16 +926,38 @@ export function createReviewFlowController(
       return;
     }
 
+    let reviewGuidelines: string | undefined;
+    if (dependencies.readReviewGuidelines !== undefined) {
+      try {
+        reviewGuidelines = await dependencies.readReviewGuidelines();
+      } catch (error) {
+        ctx.ui.notify(
+          error instanceof Error
+            ? error.message
+            : "Failed to load repository review guidelines.",
+          "error",
+        );
+        return;
+      }
+    }
+
     const thinkingLevel = dependencies.getThinkingLevel();
-    const draftOptions =
+    const draftOptions: ReviewPromptDraftOptions = {};
+    if (
       resolvedTarget.kind === "diff-against" &&
       resolvedTarget.diffText !== undefined
-        ? { diffText: resolvedTarget.diffText }
-        : undefined;
+    ) {
+      draftOptions.diffText = resolvedTarget.diffText;
+    }
+
+    const normalizedReviewGuidelines = normalizeOptionalText(reviewGuidelines);
+    if (normalizedReviewGuidelines !== undefined) {
+      draftOptions.reviewGuidelines = normalizedReviewGuidelines;
+    }
 
     const draftRequest = dependencies.buildDraftRequest(
       resolvedTarget,
-      draftOptions,
+      Object.keys(draftOptions).length === 0 ? undefined : draftOptions,
     );
     ctx.ui.notify("Generating review prompt draft…", "info");
 
