@@ -8,12 +8,60 @@ function commandKey(command: string, args: string[]): string {
   return [command, ...args].join("\0");
 }
 
+function gitDiffArgs(ref: string, ...args: string[]): string[] {
+  return ["--no-pager", "diff", `${ref}...HEAD`, ...args];
+}
+
+function jjDiffArgs(ref: string, ...args: string[]): string[] {
+  return ["--no-pager", "diff", "--from", ref, ...args];
+}
+
 function gitDiffKey(ref: string, ...args: string[]): string {
-  return commandKey("git", ["--no-pager", "diff", `${ref}...HEAD`, ...args]);
+  return commandKey("git", gitDiffArgs(ref, ...args));
 }
 
 function jjDiffKey(ref: string, ...args: string[]): string {
-  return commandKey("jj", ["--no-pager", "diff", "--from", ref, ...args]);
+  return commandKey("jj", jjDiffArgs(ref, ...args));
+}
+
+function gitDiffCommandHints(ref: string) {
+  return [
+    {
+      label: "List changed files",
+      command: "git",
+      args: gitDiffArgs(ref, "--name-only"),
+    },
+    {
+      label: "Show full diff",
+      command: "git",
+      args: gitDiffArgs(ref),
+    },
+    {
+      label: "Show diff for a file",
+      command: "git",
+      args: gitDiffArgs(ref, "--", "<file>"),
+    },
+  ] as const;
+}
+
+function jjDiffCommandHints(ref: string) {
+  return [
+    {
+      label: "List changed files",
+      command: "jj",
+      args: jjDiffArgs(ref, "--name-only"),
+    },
+    {
+      label: "Show full diff",
+      command: "jj",
+      args: jjDiffArgs(ref, "--git"),
+    },
+    {
+      label: "Show diff for a file",
+      command: "jj",
+      args: jjDiffArgs(ref, "--git", "--", "<file>"),
+    },
+  ] as const;
 }
 
 function fakeExec(responses: Record<string, string>): ExecCommand {
@@ -73,23 +121,7 @@ test("resolveReviewTarget resolves diff-against with safe command hints", async 
     files: ["src/a.ts", "src/b.ts"],
     diffStat: "2 files changed",
     diffText: "diff --git a/src/a.ts b/src/a.ts\n+change\n",
-    commandHints: [
-      {
-        label: "List changed files",
-        command: "git",
-        args: ["--no-pager", "diff", "origin/main...HEAD", "--name-only"],
-      },
-      {
-        label: "Show full diff",
-        command: "git",
-        args: ["--no-pager", "diff", "origin/main...HEAD"],
-      },
-      {
-        label: "Show diff for a file",
-        command: "git",
-        args: ["--no-pager", "diff", "origin/main...HEAD", "--", "<file>"],
-      },
-    ],
+    commandHints: gitDiffCommandHints("origin/main"),
   });
 });
 
@@ -157,31 +189,7 @@ for (const scenario of [
       jjStatCommand,
       jjDiffCommand,
     ]);
-    assert.deepEqual(target.commandHints, [
-      {
-        label: "List changed files",
-        command: "jj",
-        args: ["--no-pager", "diff", "--from", scenario.ref, "--name-only"],
-      },
-      {
-        label: "Show full diff",
-        command: "jj",
-        args: ["--no-pager", "diff", "--from", scenario.ref, "--git"],
-      },
-      {
-        label: "Show diff for a file",
-        command: "jj",
-        args: [
-          "--no-pager",
-          "diff",
-          "--from",
-          scenario.ref,
-          "--git",
-          "--",
-          "<file>",
-        ],
-      },
-    ]);
+    assert.deepEqual(target.commandHints, jjDiffCommandHints(scenario.ref));
   });
 }
 

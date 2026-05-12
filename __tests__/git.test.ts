@@ -49,47 +49,37 @@ test("validateDiffRef rejects dangerous or ambiguous refs", () => {
   }
 });
 
+const GIT_REF = "origin/main";
+
+function gitDiffArgs(ref: string, ...args: string[]) {
+  return ["--no-pager", "diff", `${ref}...HEAD`, ...args];
+}
+
+function jjDiffArgs(ref: string, ...args: string[]) {
+  return ["--no-pager", "diff", "--from", ref, ...args];
+}
+
 test("git and jj diff command builders use argument arrays", () => {
   const cases = [
     [
-      buildGitDiffNameOnlyCommand("origin/main"),
+      buildGitDiffNameOnlyCommand(GIT_REF),
       "git",
-      ["--no-pager", "diff", "origin/main...HEAD", "--name-only"],
+      gitDiffArgs(GIT_REF, "--name-only"),
     ],
+    [buildGitDiffStatCommand(GIT_REF), "git", gitDiffArgs(GIT_REF, "--stat")],
+    [buildGitDiffCommand(GIT_REF), "git", gitDiffArgs(GIT_REF)],
     [
-      buildGitDiffStatCommand("origin/main"),
+      buildGitDiffForFileCommand(GIT_REF, "src/index.ts"),
       "git",
-      ["--no-pager", "diff", "origin/main...HEAD", "--stat"],
+      gitDiffArgs(GIT_REF, "--", "src/index.ts"),
     ],
-    [
-      buildGitDiffCommand("origin/main"),
-      "git",
-      ["--no-pager", "diff", "origin/main...HEAD"],
-    ],
-    [
-      buildGitDiffForFileCommand("origin/main", "src/index.ts"),
-      "git",
-      ["--no-pager", "diff", "origin/main...HEAD", "--", "src/index.ts"],
-    ],
-    [
-      buildJjDiffNameOnlyCommand("@-"),
-      "jj",
-      ["--no-pager", "diff", "--from", "@-", "--name-only"],
-    ],
-    [
-      buildJjDiffStatCommand("@-"),
-      "jj",
-      ["--no-pager", "diff", "--from", "@-", "--stat"],
-    ],
-    [
-      buildJjDiffCommand("@-"),
-      "jj",
-      ["--no-pager", "diff", "--from", "@-", "--git"],
-    ],
+    [buildJjDiffNameOnlyCommand("@-"), "jj", jjDiffArgs("@-", "--name-only")],
+    [buildJjDiffStatCommand("@-"), "jj", jjDiffArgs("@-", "--stat")],
+    [buildJjDiffCommand("@-"), "jj", jjDiffArgs("@-", "--git")],
     [
       buildJjDiffForFileCommand("@-", "src/index.ts"),
       "jj",
-      ["--no-pager", "diff", "--from", "@-", "--git", "--", "src/index.ts"],
+      jjDiffArgs("@-", "--git", "--", "src/index.ts"),
     ],
   ] as const;
 

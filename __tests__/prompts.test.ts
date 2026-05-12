@@ -11,6 +11,36 @@ import {
   type ReviewComment,
 } from "../src/types.js";
 
+const DIFF_REF = "origin/main";
+const DIFF_RANGE = `${DIFF_REF}...HEAD`;
+
+function gitDiffArgs(...args: string[]): string[] {
+  return ["--no-pager", "diff", DIFF_RANGE, ...args];
+}
+
+function gitDiffCommandHint(label: string, ...args: string[]) {
+  return {
+    label,
+    command: "git",
+    args: gitDiffArgs(...args),
+  };
+}
+
+function diffTarget(): ResolvedReviewTarget {
+  return {
+    kind: "diff-against",
+    ref: DIFF_REF,
+    targetHint: DIFF_REF,
+    files: ["src/auth.ts", "README.md"],
+    diffStat: "2 files changed, 20 insertions(+)",
+    commandHints: [
+      gitDiffCommandHint("List changed files", "--name-only"),
+      gitDiffCommandHint("Show full diff"),
+      gitDiffCommandHint("Show diff for a file", "--", "<file>"),
+    ],
+  };
+}
+
 function reviewComment(
   id: string,
   priority: ReviewComment["priority"],
@@ -24,34 +54,7 @@ function reviewComment(
     comment,
     references: [{ filePath: "src/auth.ts", startLine: 10, endLine: 12 }],
     createdAt: 1000,
-    targetHint: "origin/main",
-  };
-}
-
-function diffTarget(): ResolvedReviewTarget {
-  return {
-    kind: "diff-against",
-    ref: "origin/main",
-    targetHint: "origin/main",
-    files: ["src/auth.ts", "README.md"],
-    diffStat: "2 files changed, 20 insertions(+)",
-    commandHints: [
-      {
-        label: "List changed files",
-        command: "git",
-        args: ["--no-pager", "diff", "origin/main...HEAD", "--name-only"],
-      },
-      {
-        label: "Show full diff",
-        command: "git",
-        args: ["--no-pager", "diff", "origin/main...HEAD"],
-      },
-      {
-        label: "Show diff for a file",
-        command: "git",
-        args: ["--no-pager", "diff", "origin/main...HEAD", "--", "<file>"],
-      },
-    ],
+    targetHint: DIFF_REF,
   };
 }
 
