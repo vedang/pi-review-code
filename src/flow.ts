@@ -212,13 +212,13 @@ function formatReference(reference: {
   return `${reference.filePath}:${reference.startLine}`;
 }
 
-function normalizeFixContext(fixContext?: string): string | undefined {
-  const trimmed = fixContext?.trim();
+function normalizeOptionalText(value?: string): string | undefined {
+  const trimmed = value?.trim();
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
 function withFixContext(fixContext?: string): { fixContext?: string } {
-  const normalized = normalizeFixContext(fixContext);
+  const normalized = normalizeOptionalText(fixContext);
   return normalized === undefined ? {} : { fixContext: normalized };
 }
 
@@ -879,11 +879,6 @@ function sendSummaryMessage(
     display: true,
     details: summary.details,
   });
-}
-
-function normalizeOptionalText(value?: string): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
 export function createReviewFlowController(

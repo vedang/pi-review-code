@@ -51,18 +51,23 @@ function buildCommandHintsBlock(
     .join("\n");
 }
 
+function buildOptionalTextBlock(label: string, value?: string): string[] {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length === 0 ? [] : ["", label, trimmed];
+}
+
 function buildReviewContextBlock(reviewContext?: string): string[] {
-  const trimmed = reviewContext?.trim() ?? "";
-  return trimmed.length === 0
-    ? []
-    : ["", "Human-provided review context:", trimmed];
+  return buildOptionalTextBlock(
+    "Human-provided review context:",
+    reviewContext,
+  );
 }
 
 function buildFixContextBlock(fixContext?: string): string[] {
-  const trimmed = fixContext?.trim() ?? "";
-  return trimmed.length === 0
-    ? []
-    : ["", "Additional human context for this fix loop:", trimmed];
+  return buildOptionalTextBlock(
+    "Additional human context for this fix loop:",
+    fixContext,
+  );
 }
 
 function buildReviewGuidelinesBlock(reviewGuidelines?: string): string[] {
