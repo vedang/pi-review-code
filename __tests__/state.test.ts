@@ -8,6 +8,68 @@ import {
   getLatestReviewState,
 } from "../src/state.js";
 
+function createStateManagerHarness(initialTools: string[]) {
+  let activeTools = [...initialTools];
+  const setActiveToolsCalls: string[][] = [];
+  const appended: Array<{ customType: string; data: unknown }> = [];
+  const manager = createReviewStateManager({
+    appendEntry: (customType: string, data: unknown) =>
+      appended.push({ customType, data }),
+    getActiveTools: () => activeTools,
+    setActiveTools: (nextTools: string[]) => {
+      setActiveToolsCalls.push(nextTools);
+      activeTools = nextTools;
+    },
+  } as never);
+
+  return { manager, setActiveToolsCalls, appended };
+}
+
+function metaRunStart() {
+  return {
+    originLeafId: "leaf-meta",
+    runId: "meta-1",
+    targetHint: "origin/main",
+    metaPrompt: "Create review prompt",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  };
+}
+
+function reviewRunStart() {
+  return {
+    originLeafId: "leaf-1",
+    runId: "run-1",
+    targetHint: "origin/main",
+    reviewPrompt: "Review diff",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  };
+}
+
+function fixRunStart(
+  overrides: Partial<ReturnType<typeof baseFixRunStart>> = {},
+) {
+  return { ...baseFixRunStart(), ...overrides };
+}
+
+function baseFixRunStart() {
+  return {
+    originLeafId: "leaf-2",
+    runId: "fix-1",
+    targetHint: "origin/main",
+    reviewPrompt: "Fix review comments",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1", "comment-2"],
+    fixContext: "Focus the auth edge case.",
+  };
+}
+
 test("createInactiveReviewState returns versioned inactive state", () => {
   assert.deepEqual(createInactiveReviewState(), {
     version: 1,
@@ -92,28 +154,14 @@ test("getLatestReviewState reconstructs persisted meta state", () => {
 });
 
 test("review state manager persists meta run and enables prompt tool", () => {
-  let activeTools = ["read", "set_review_prompt", "add_review_comment", "bash"];
-  const setActiveToolsCalls: string[][] = [];
-  const appended: Array<{ customType: string; data: unknown }> = [];
-  const manager = createReviewStateManager({
-    appendEntry: (customType: string, data: unknown) =>
-      appended.push({ customType, data }),
-    getActiveTools: () => activeTools,
-    setActiveTools: (nextTools: string[]) => {
-      setActiveToolsCalls.push(nextTools);
-      activeTools = nextTools;
-    },
-  } as never);
+  const { manager, setActiveToolsCalls, appended } = createStateManagerHarness([
+    "read",
+    "set_review_prompt",
+    "add_review_comment",
+    "bash",
+  ]);
 
-  manager.startMetaRun({ hasUI: false } as never, {
-    originLeafId: "leaf-meta",
-    runId: "meta-1",
-    targetHint: "origin/main",
-    metaPrompt: "Create review prompt",
-    originModelProvider: "anthropic",
-    originModelId: "claude-sonnet",
-    originThinkingLevel: "high",
-  });
+  manager.startMetaRun({ hasUI: false } as never, metaRunStart());
 
   assert.deepEqual(setActiveToolsCalls, [
     ["read", "bash", "set_review_prompt"],
@@ -138,28 +186,13 @@ test("review state manager persists meta run and enables prompt tool", () => {
 });
 
 test("review state manager persists review run and enables comment tool", () => {
-  let activeTools = ["read", "set_review_prompt", "bash"];
-  const setActiveToolsCalls: string[][] = [];
-  const appended: Array<{ customType: string; data: unknown }> = [];
-  const manager = createReviewStateManager({
-    appendEntry: (customType: string, data: unknown) =>
-      appended.push({ customType, data }),
-    getActiveTools: () => activeTools,
-    setActiveTools: (nextTools: string[]) => {
-      setActiveToolsCalls.push(nextTools);
-      activeTools = nextTools;
-    },
-  } as never);
+  const { manager, setActiveToolsCalls, appended } = createStateManagerHarness([
+    "read",
+    "set_review_prompt",
+    "bash",
+  ]);
 
-  manager.startReviewRun({ hasUI: false } as never, {
-    originLeafId: "leaf-1",
-    runId: "run-1",
-    targetHint: "origin/main",
-    reviewPrompt: "Review diff",
-    originModelProvider: "anthropic",
-    originModelId: "claude-sonnet",
-    originThinkingLevel: "high",
-  });
+  manager.startReviewRun({ hasUI: false } as never, reviewRunStart());
 
   assert.deepEqual(setActiveToolsCalls, [
     ["read", "bash", "add_review_comment"],
@@ -183,25 +216,16 @@ test("review state manager persists review run and enables comment tool", () => 
 });
 
 test("review state manager does not drop built-in tools while swapping review tools", () => {
-  let activeTools = ["read", "edit", "write", "set_review_prompt"];
-  const setActiveToolsCalls: string[][] = [];
-  const manager = createReviewStateManager({
-    appendEntry: () => {},
-    getActiveTools: () => activeTools,
-    setActiveTools: (nextTools: string[]) => {
-      setActiveToolsCalls.push(nextTools);
-      activeTools = nextTools;
-    },
-  } as never);
+  const { manager, setActiveToolsCalls } = createStateManagerHarness([
+    "read",
+    "edit",
+    "write",
+    "set_review_prompt",
+  ]);
 
   manager.startReviewRun({ hasUI: false } as never, {
-    originLeafId: "leaf-1",
+    ...reviewRunStart(),
     runId: "review-1",
-    targetHint: "origin/main",
-    reviewPrompt: "Review diff",
-    originModelProvider: "anthropic",
-    originModelId: "claude-sonnet",
-    originThinkingLevel: "high",
   });
   manager.clearActiveRun({ hasUI: false } as never);
 
@@ -212,31 +236,14 @@ test("review state manager does not drop built-in tools while swapping review to
 });
 
 test("review state manager persists fix run and disables review tools", () => {
-  let activeTools = ["read", "set_review_prompt", "add_review_comment", "bash"];
-  const setActiveToolsCalls: string[][] = [];
-  const appended: Array<{ customType: string; data: unknown }> = [];
-  const manager = createReviewStateManager({
-    appendEntry: (customType: string, data: unknown) =>
-      appended.push({ customType, data }),
-    getActiveTools: () => activeTools,
-    setActiveTools: (nextTools: string[]) => {
-      setActiveToolsCalls.push(nextTools);
-      activeTools = nextTools;
-    },
-  } as never);
+  const { manager, setActiveToolsCalls, appended } = createStateManagerHarness([
+    "read",
+    "set_review_prompt",
+    "add_review_comment",
+    "bash",
+  ]);
 
-  manager.startFixRun({ hasUI: false } as never, {
-    originLeafId: "leaf-2",
-    runId: "fix-1",
-    targetHint: "origin/main",
-    reviewPrompt: "Fix review comments",
-    originModelProvider: "anthropic",
-    originModelId: "claude-sonnet",
-    originThinkingLevel: "medium",
-    sourceReviewRunId: "review-1",
-    commentIds: ["comment-1", "comment-2"],
-    fixContext: "Focus the auth edge case.",
-  });
+  manager.startFixRun({ hasUI: false } as never, fixRunStart());
 
   assert.deepEqual(setActiveToolsCalls, [["read", "bash"]]);
   assert.deepEqual(appended, [
@@ -304,26 +311,12 @@ test("getLatestReviewState reconstructs persisted fix state", () => {
 });
 
 test("review state manager omits blank fix context", () => {
-  const appended: Array<{ customType: string; data: unknown }> = [];
-  const manager = createReviewStateManager({
-    appendEntry: (customType: string, data: unknown) =>
-      appended.push({ customType, data }),
-    getActiveTools: () => ["read"],
-    setActiveTools: () => {},
-  } as never);
+  const { manager, appended } = createStateManagerHarness(["read"]);
 
-  manager.startFixRun({ hasUI: false } as never, {
-    originLeafId: "leaf-2",
-    runId: "fix-1",
-    targetHint: "origin/main",
-    reviewPrompt: "Fix review comments",
-    originModelProvider: "anthropic",
-    originModelId: "claude-sonnet",
-    originThinkingLevel: "medium",
-    sourceReviewRunId: "review-1",
-    commentIds: ["comment-1"],
-    fixContext: "  \n\t  ",
-  });
+  manager.startFixRun(
+    { hasUI: false } as never,
+    fixRunStart({ commentIds: ["comment-1"], fixContext: "  \n\t  " }),
+  );
 
   assert.deepEqual(appended[0]?.data, {
     version: 1,
@@ -341,18 +334,12 @@ test("review state manager omits blank fix context", () => {
 });
 
 test("review state manager clears active run and disables review tools", () => {
-  let activeTools = ["read", "set_review_prompt", "add_review_comment", "bash"];
-  const setActiveToolsCalls: string[][] = [];
-  const appended: Array<{ customType: string; data: unknown }> = [];
-  const manager = createReviewStateManager({
-    appendEntry: (customType: string, data: unknown) =>
-      appended.push({ customType, data }),
-    getActiveTools: () => activeTools,
-    setActiveTools: (nextTools: string[]) => {
-      setActiveToolsCalls.push(nextTools);
-      activeTools = nextTools;
-    },
-  } as never);
+  const { manager, setActiveToolsCalls, appended } = createStateManagerHarness([
+    "read",
+    "set_review_prompt",
+    "add_review_comment",
+    "bash",
+  ]);
 
   manager.clearActiveRun({ hasUI: false } as never);
 
@@ -366,16 +353,11 @@ test("review state manager clears active run and disables review tools", () => {
 });
 
 test("review state manager refreshes persisted inactive state", () => {
-  let activeTools = ["read", "set_review_prompt", "add_review_comment"];
-  const setActiveToolsCalls: string[][] = [];
-  const manager = createReviewStateManager({
-    appendEntry: () => {},
-    getActiveTools: () => activeTools,
-    setActiveTools: (nextTools: string[]) => {
-      setActiveToolsCalls.push(nextTools);
-      activeTools = nextTools;
-    },
-  } as never);
+  const { manager, setActiveToolsCalls } = createStateManagerHarness([
+    "read",
+    "set_review_prompt",
+    "add_review_comment",
+  ]);
 
   manager.refresh({
     hasUI: false,

@@ -2,13 +2,13 @@ import { SET_REVIEW_PROMPT_TOOL_NAME } from "./meta-result.js";
 import {
   REVIEW_STATE_ENTRY_TYPE,
   REVIEW_STATE_VERSION,
-  type ReviewActiveRunInfo,
   type ReviewActiveState,
   type ReviewFixState,
   type ReviewFixStateStart,
   type ReviewInactiveState,
   type ReviewMetaState,
   type ReviewMetaStateStart,
+  type ReviewRunTargetInfo,
   type ReviewState,
   type ReviewStateStart,
 } from "./types.js";
@@ -39,6 +39,46 @@ function readOptionalTrimmedString(
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+const RUN_TARGET_STATE_KEYS = [
+  "runId",
+  "originLeafId",
+  "targetHint",
+  "originModelProvider",
+  "originModelId",
+  "originThinkingLevel",
+] as const;
+
+function readRunTargetInfo(
+  raw: Record<string, unknown>,
+): ReviewRunTargetInfo | undefined {
+  if (!RUN_TARGET_STATE_KEYS.every((key) => hasString(raw, key))) {
+    return undefined;
+  }
+
+  return {
+    runId: String(raw.runId),
+    originLeafId: String(raw.originLeafId),
+    targetHint: String(raw.targetHint),
+    originModelProvider: String(raw.originModelProvider),
+    originModelId: String(raw.originModelId),
+    originThinkingLevel: String(raw.originThinkingLevel),
+  };
+}
+
+function withStateVersion(value: ReviewRunTargetInfo): ReviewRunTargetInfo & {
+  version: typeof REVIEW_STATE_VERSION;
+} {
+  return {
+    version: REVIEW_STATE_VERSION,
+    runId: value.runId,
+    originLeafId: value.originLeafId,
+    targetHint: value.targetHint,
+    originModelProvider: value.originModelProvider,
+    originModelId: value.originModelId,
+    originThinkingLevel: value.originThinkingLevel,
+  };
+}
+
 function readStateData(raw: unknown): ReviewState | undefined {
   if (!isRecord(raw) || raw.version !== REVIEW_STATE_VERSION) {
     return undefined;
@@ -56,26 +96,12 @@ function readStateData(raw: unknown): ReviewState | undefined {
     return undefined;
   }
 
-  if (
-    !hasString(raw, "runId") ||
-    !hasString(raw, "originLeafId") ||
-    !hasString(raw, "targetHint") ||
-    !hasString(raw, "originModelProvider") ||
-    !hasString(raw, "originModelId") ||
-    !hasString(raw, "originThinkingLevel")
-  ) {
+  const runTargetInfo = readRunTargetInfo(raw);
+  if (runTargetInfo === undefined) {
     return undefined;
   }
 
-  const baseState = {
-    version: REVIEW_STATE_VERSION,
-    runId: String(raw.runId),
-    originLeafId: String(raw.originLeafId),
-    targetHint: String(raw.targetHint),
-    originModelProvider: String(raw.originModelProvider),
-    originModelId: String(raw.originModelId),
-    originThinkingLevel: String(raw.originThinkingLevel),
-  };
+  const baseState = withStateVersion(runTargetInfo);
 
   if (raw.activeKind === "meta") {
     if (!hasString(raw, "metaPrompt")) {
@@ -186,31 +212,17 @@ export type ReviewStateManager = {
 
 function toMetaStateValue(value: ReviewMetaStateStart): ReviewMetaState {
   return {
-    version: REVIEW_STATE_VERSION,
+    ...withStateVersion(value),
     activeKind: "meta",
-    runId: value.runId,
-    originLeafId: value.originLeafId,
-    targetHint: value.targetHint,
     metaPrompt: value.metaPrompt,
-    originModelProvider: value.originModelProvider,
-    originModelId: value.originModelId,
-    originThinkingLevel: value.originThinkingLevel,
   };
 }
 
-function toReviewStateValue(
-  value: ReviewStateStart | ReviewActiveRunInfo,
-): ReviewActiveState {
+function toReviewStateValue(value: ReviewStateStart): ReviewActiveState {
   return {
-    version: REVIEW_STATE_VERSION,
+    ...withStateVersion(value),
     activeKind: "review",
-    runId: value.runId,
-    originLeafId: value.originLeafId,
-    targetHint: value.targetHint,
     reviewPrompt: value.reviewPrompt,
-    originModelProvider: value.originModelProvider,
-    originModelId: value.originModelId,
-    originThinkingLevel: value.originThinkingLevel,
   };
 }
 
@@ -218,15 +230,9 @@ function toFixStateValue(value: ReviewFixStateStart): ReviewFixState {
   const fixContext = value.fixContext?.trim();
 
   return {
-    version: REVIEW_STATE_VERSION,
+    ...withStateVersion(value),
     activeKind: "fix",
-    runId: value.runId,
-    originLeafId: value.originLeafId,
-    targetHint: value.targetHint,
     reviewPrompt: value.reviewPrompt,
-    originModelProvider: value.originModelProvider,
-    originModelId: value.originModelId,
-    originThinkingLevel: value.originThinkingLevel,
     sourceReviewRunId: value.sourceReviewRunId,
     commentIds: [...value.commentIds],
     ...(fixContext === undefined || fixContext.length === 0
