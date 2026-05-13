@@ -1,3 +1,4 @@
+import { SET_REVIEW_PROMPT_TOOL_NAME } from "./meta-result.js";
 import {
   REVIEW_STATE_ENTRY_TYPE,
   REVIEW_STATE_VERSION,
@@ -6,6 +7,8 @@ import {
   type ReviewFixState,
   type ReviewFixStateStart,
   type ReviewInactiveState,
+  type ReviewMetaState,
+  type ReviewMetaStateStart,
   type ReviewState,
   type ReviewStateStart,
 } from "./types.js";
@@ -45,7 +48,11 @@ function readStateData(raw: unknown): ReviewState | undefined {
     return { version: REVIEW_STATE_VERSION, activeKind: null };
   }
 
-  if (raw.activeKind !== "review" && raw.activeKind !== "fix") {
+  if (
+    raw.activeKind !== "meta" &&
+    raw.activeKind !== "review" &&
+    raw.activeKind !== "fix"
+  ) {
     return undefined;
   }
 
@@ -53,7 +60,6 @@ function readStateData(raw: unknown): ReviewState | undefined {
     !hasString(raw, "runId") ||
     !hasString(raw, "originLeafId") ||
     !hasString(raw, "targetHint") ||
-    !hasString(raw, "reviewPrompt") ||
     !hasString(raw, "originModelProvider") ||
     !hasString(raw, "originModelId") ||
     !hasString(raw, "originThinkingLevel")
@@ -66,14 +72,34 @@ function readStateData(raw: unknown): ReviewState | undefined {
     runId: String(raw.runId),
     originLeafId: String(raw.originLeafId),
     targetHint: String(raw.targetHint),
-    reviewPrompt: String(raw.reviewPrompt),
     originModelProvider: String(raw.originModelProvider),
     originModelId: String(raw.originModelId),
     originThinkingLevel: String(raw.originThinkingLevel),
   };
 
+  if (raw.activeKind === "meta") {
+    if (!hasString(raw, "metaPrompt")) {
+      return undefined;
+    }
+
+    return {
+      ...baseState,
+      activeKind: "meta",
+      metaPrompt: String(raw.metaPrompt),
+    };
+  }
+
+  if (!hasString(raw, "reviewPrompt")) {
+    return undefined;
+  }
+
+  const reviewState = {
+    ...baseState,
+    reviewPrompt: String(raw.reviewPrompt),
+  };
+
   if (raw.activeKind === "review") {
-    return { ...baseState, activeKind: "review" };
+    return { ...reviewState, activeKind: "review" };
   }
 
   if (!hasString(raw, "sourceReviewRunId") || !Array.isArray(raw.commentIds)) {
@@ -91,7 +117,7 @@ function readStateData(raw: unknown): ReviewState | undefined {
   const fixContext = readOptionalTrimmedString(raw, "fixContext");
 
   return {
-    ...baseState,
+    ...reviewState,
     activeKind: "fix",
     sourceReviewRunId: String(raw.sourceReviewRunId),
     commentIds,
@@ -146,6 +172,7 @@ export type ReviewStateRuntime = {
 
 export type ReviewStateManager = {
   getState: () => ReviewState;
+  startMetaRun: (ctx: { hasUI: boolean }, state: ReviewMetaStateStart) => void;
   startReviewRun: (ctx: { hasUI: boolean }, state: ReviewStateStart) => void;
   startFixRun: (ctx: { hasUI: boolean }, state: ReviewFixStateStart) => void;
   clearActiveRun: (ctx: { hasUI: boolean }) => void;
@@ -156,6 +183,20 @@ export type ReviewStateManager = {
     };
   }) => void;
 };
+
+function toMetaStateValue(value: ReviewMetaStateStart): ReviewMetaState {
+  return {
+    version: REVIEW_STATE_VERSION,
+    activeKind: "meta",
+    runId: value.runId,
+    originLeafId: value.originLeafId,
+    targetHint: value.targetHint,
+    metaPrompt: value.metaPrompt,
+    originModelProvider: value.originModelProvider,
+    originModelId: value.originModelId,
+    originThinkingLevel: value.originThinkingLevel,
+  };
+}
 
 function toReviewStateValue(
   value: ReviewStateStart | ReviewActiveRunInfo,
@@ -194,19 +235,28 @@ function toFixStateValue(value: ReviewFixStateStart): ReviewFixState {
   };
 }
 
+const EXTENSION_OWNED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  ADD_REVIEW_COMMENT_TOOL_NAME,
+  SET_REVIEW_PROMPT_TOOL_NAME,
+]);
+
 function computeActiveTools(
   activeTools: string[],
   state: ReviewState,
 ): string[] {
   const filteredTools = activeTools.filter(
-    (toolName) => toolName !== ADD_REVIEW_COMMENT_TOOL_NAME,
+    (toolName) => !EXTENSION_OWNED_TOOL_NAMES.has(toolName),
   );
 
-  if (state.activeKind !== "review") {
-    return filteredTools;
+  if (state.activeKind === "meta") {
+    return [...filteredTools, SET_REVIEW_PROMPT_TOOL_NAME];
   }
 
-  return [...filteredTools, ADD_REVIEW_COMMENT_TOOL_NAME];
+  if (state.activeKind === "review") {
+    return [...filteredTools, ADD_REVIEW_COMMENT_TOOL_NAME];
+  }
+
+  return filteredTools;
 }
 
 export function createReviewStateManager(
@@ -223,6 +273,14 @@ export function createReviewStateManager(
   return {
     getState(): ReviewState {
       return state;
+    },
+    startMetaRun(
+      _ctx: { hasUI: boolean },
+      nextRun: ReviewMetaStateStart,
+    ): void {
+      state = toMetaStateValue(nextRun);
+      runtime.appendEntry(REVIEW_STATE_ENTRY_TYPE, state);
+      syncTools(state);
     },
     startReviewRun(_ctx: { hasUI: boolean }, nextRun: ReviewStateStart): void {
       state = toReviewStateValue(nextRun);
