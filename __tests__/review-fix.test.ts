@@ -16,7 +16,7 @@ import type {
   ReviewFixWidgetConfig,
   ReviewFixWidgetResult,
 } from "../src/review-fix-widget.js";
-import type { ReviewComment } from "../src/types.js";
+import type { ReviewComment, ReviewState } from "../src/types.js";
 
 function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
   return {
@@ -29,6 +29,50 @@ function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
     createdAt: 123,
     targetHint: "review auth boundaries",
     ...overrides,
+  };
+}
+
+function activeMetaState(): ReviewState {
+  return {
+    version: 1,
+    activeKind: "meta",
+    runId: "meta-active",
+    originLeafId: "leaf-meta",
+    targetHint: "origin/main",
+    metaPrompt: "Create review prompt",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  };
+}
+
+function activeReviewState(): ReviewState {
+  return {
+    version: 1,
+    activeKind: "review",
+    runId: "review-active",
+    originLeafId: "leaf-review",
+    targetHint: "origin/main",
+    reviewPrompt: "Review diff",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  };
+}
+
+function activeFixState(): ReviewState {
+  return {
+    version: 1,
+    activeKind: "fix",
+    runId: "fix-active",
+    originLeafId: "leaf-fix",
+    targetHint: "origin/main",
+    reviewPrompt: "Fix review comments",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1"],
   };
 }
 
@@ -241,6 +285,8 @@ type HarnessOptions = {
   fixWidgetResult?: ReviewFixWidgetResult;
   showFixWidget?: false;
   navigateResults?: Array<{ cancelled: boolean } | Error>;
+  activeState?: ReviewState;
+  fixWidgetDelay?: Promise<void>;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -262,6 +308,10 @@ function createHarness(options: HarnessOptions = {}) {
   const waitForIdleCalls: number[] = [];
   const fixWidgetConfigs: ReviewFixWidgetConfig[] = [];
   const navigateResults = [...(options.navigateResults ?? [])];
+  let currentState: ReviewState = options.activeState ?? {
+    version: 1,
+    activeKind: null,
+  };
 
   const entries = options.entries ?? [
     reviewSummaryEntry("review-1", [comment({ runId: "review-1" })]),
@@ -296,12 +346,17 @@ function createHarness(options: HarnessOptions = {}) {
       },
     },
     stateManager: {
-      startReviewRun: () => {},
-      startFixRun: (_ctx: unknown, state: unknown) => {
+      getState: () => currentState,
+      startReviewRun: (_ctx, state) => {
+        currentState = { version: 1, activeKind: "review", ...state };
+      },
+      startFixRun: (_ctx, state) => {
         startedFixRuns.push(state);
+        currentState = { version: 1, activeKind: "fix", ...state };
       },
       clearActiveRun: (ctx: unknown) => {
         clearedRuns.push(ctx);
+        currentState = { version: 1, activeKind: null };
       },
     },
     resolveTarget: async () => {
@@ -325,6 +380,7 @@ function createHarness(options: HarnessOptions = {}) {
             config: ReviewFixWidgetConfig,
           ) => {
             fixWidgetConfigs.push(config);
+            await options.fixWidgetDelay;
             return (
               options.fixWidgetResult ?? {
                 submitted: true,
@@ -421,6 +477,63 @@ function assertFixRunStarted(
     },
   ]);
 }
+
+test("review-fix rejects launch while any pi-review-code run is active", async () => {
+  for (const [activeState, message] of [
+    [
+      activeMetaState(),
+      "Cannot start review-fix: pi-review-code review prompt meta-pass meta-active is still active.",
+    ],
+    [
+      activeReviewState(),
+      "Cannot start review-fix: pi-review-code review review-active is still active.",
+    ],
+    [
+      activeFixState(),
+      "Cannot start review-fix: pi-review-code review-fix fix-active is still active.",
+    ],
+  ] as const) {
+    const harness = createHarness({ activeState });
+
+    await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+    assert.deepEqual(harness.fixWidgetConfigs, []);
+    assert.deepEqual(harness.waitForIdleCalls, []);
+    assert.deepEqual(harness.sentUserMessages, []);
+    assert.deepEqual(harness.startedFixRuns, []);
+    assert.deepEqual(harness.notifications, [{ message, level: "error" }]);
+  }
+});
+
+test("review-fix rejects overlapping launch while widget is pending", async () => {
+  let releaseWidget: () => void = () => {};
+  const fixWidgetDelay = new Promise<void>((resolve) => {
+    releaseWidget = resolve;
+  });
+  const harness = createHarness({ fixWidgetDelay });
+
+  const firstLaunch = harness.controller.handleReviewFixCommand(
+    "",
+    harness.ctx,
+  );
+  await Promise.resolve();
+
+  await harness.controller.handleReviewFixCommand("", harness.ctx);
+
+  assert.equal(harness.fixWidgetConfigs.length, 1);
+  assert.deepEqual(harness.notifications[0], {
+    message:
+      "Cannot start review-fix: pi-review-code review-fix launch is already in progress.",
+    level: "error",
+  });
+  assert.deepEqual(harness.sentUserMessages, []);
+
+  releaseWidget();
+  await firstLaunch;
+
+  assert.equal(harness.startedFixRuns.length, 1);
+  assert.equal(harness.sentUserMessages.length, 1);
+});
 
 test("review-fix without arguments opens widget before model validation", async () => {
   const harness = createHarness({

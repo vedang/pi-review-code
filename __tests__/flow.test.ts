@@ -10,7 +10,11 @@ import {
   buildReviewBranchSummary,
   createReviewFlowController,
 } from "../src/flow.js";
-import type { ResolvedReviewTarget, ReviewComment } from "../src/types.js";
+import type {
+  ResolvedReviewTarget,
+  ReviewComment,
+  ReviewState,
+} from "../src/types.js";
 
 function promptTarget(): ResolvedReviewTarget {
   return {
@@ -32,6 +36,36 @@ function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
     createdAt: 123,
     targetHint: "review auth boundaries",
     ...overrides,
+  };
+}
+
+function activeMetaState(): ReviewState {
+  return {
+    version: 1,
+    activeKind: "meta",
+    runId: "meta-1",
+    originLeafId: "leaf-meta",
+    targetHint: "origin/main",
+    metaPrompt: "Create review prompt",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  };
+}
+
+function activeFixState(): ReviewState {
+  return {
+    version: 1,
+    activeKind: "fix",
+    runId: "fix-1",
+    originLeafId: "leaf-fix",
+    targetHint: "origin/main",
+    reviewPrompt: "Fix review comments",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "medium",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1"],
   };
 }
 
@@ -64,6 +98,8 @@ type HarnessOptions = {
   initialLeafId?: string | null;
   anchorLeafId?: string;
   inputWidgetResult?: InputWidgetResult;
+  activeState?: ReviewState;
+  inputWidgetDelay?: Promise<void>;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -89,6 +125,10 @@ function createHarness(options: HarnessOptions = {}) {
   const draftRequests: unknown[] = [];
   const draftOptions: unknown[] = [];
   const reviewGuidelineReads: number[] = [];
+  let currentState: ReviewState = options.activeState ?? {
+    version: 1,
+    activeKind: null,
+  };
 
   const target = options.target ?? promptTarget();
   const draftOk = options.draftOk ?? true;
@@ -125,11 +165,14 @@ function createHarness(options: HarnessOptions = {}) {
       },
     },
     stateManager: {
-      startReviewRun: (_ctx: unknown, state: unknown) => {
+      getState: () => currentState,
+      startReviewRun: (_ctx, state) => {
         startedRuns.push(state);
+        currentState = { version: 1, activeKind: "review", ...state };
       },
       clearActiveRun: (ctx: unknown) => {
         clearedRuns.push(ctx);
+        currentState = { version: 1, activeKind: null };
       },
     },
     resolveTarget: async (reviewTarget) => {
@@ -166,6 +209,7 @@ function createHarness(options: HarnessOptions = {}) {
       : {
           showInputWidget: async (_ctx: unknown, config: InputWidgetCall) => {
             inputWidgetCalls.push(config);
+            await options.inputWidgetDelay;
             return options.inputWidgetResult ?? { submitted: false };
           },
         }),
@@ -266,6 +310,91 @@ test("review flow launches branch after human submits generated prompt", async (
     },
   ]);
   assert.equal(harness.draftRequests.length, 1);
+});
+
+test("review flow rejects a second review while a run is active", async () => {
+  const harness = createHarness({ editorResult: "Edited review prompt" });
+
+  await harness.controller.handleReviewCommand(
+    "review auth boundaries",
+    harness.ctx,
+  );
+  await harness.controller.handleReviewCommand(
+    "review auth boundaries again",
+    harness.ctx,
+  );
+
+  assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
+  assert.equal(harness.startedRuns.length, 1);
+  assert.deepEqual(harness.notifications.at(-1), {
+    message:
+      "Cannot start review: pi-review-code review review-1 is still active.",
+    level: "error",
+  });
+});
+
+test("review flow rejects persisted meta and fix runs before widget", async () => {
+  for (const [activeState, message] of [
+    [
+      activeMetaState(),
+      "Cannot start review: pi-review-code review prompt meta-pass meta-1 is still active.",
+    ],
+    [
+      activeFixState(),
+      "Cannot start review: pi-review-code review-fix fix-1 is still active.",
+    ],
+  ] as const) {
+    const harness = createHarness({
+      activeState,
+      inputWidgetResult: {
+        submitted: true,
+        kind: "review",
+        primaryValue: "review auth boundaries",
+      },
+    });
+
+    await harness.controller.handleReviewCommand("", harness.ctx);
+
+    assert.deepEqual(harness.inputWidgetCalls, []);
+    assert.deepEqual(harness.sentUserMessages, []);
+    assert.deepEqual(harness.startedRuns, []);
+    assert.deepEqual(harness.notifications, [{ message, level: "error" }]);
+  }
+});
+
+test("review flow rejects overlapping launch while widget is pending", async () => {
+  let releaseWidget: () => void = () => {};
+  const inputWidgetDelay = new Promise<void>((resolve) => {
+    releaseWidget = resolve;
+  });
+  const harness = createHarness({
+    editorResult: "Edited review prompt",
+    inputWidgetDelay,
+    inputWidgetResult: {
+      submitted: true,
+      kind: "review",
+      primaryValue: "review auth boundaries",
+    },
+  });
+
+  const firstLaunch = harness.controller.handleReviewCommand("", harness.ctx);
+  await Promise.resolve();
+
+  await harness.controller.handleReviewCommand("", harness.ctx);
+
+  assert.equal(harness.inputWidgetCalls.length, 1);
+  assert.deepEqual(harness.notifications[0], {
+    message:
+      "Cannot start review: pi-review-code review launch is already in progress.",
+    level: "error",
+  });
+  assert.deepEqual(harness.sentUserMessages, []);
+
+  releaseWidget();
+  await firstLaunch;
+
+  assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
+  assert.equal(harness.startedRuns.length, 1);
 });
 
 test("review flow prompts for target and context before launching", async () => {

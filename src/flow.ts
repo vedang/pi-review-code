@@ -36,6 +36,7 @@ import {
   type ReviewFixRunInfo,
   type ReviewMetaResult,
   type ReviewMetaRunInfo,
+  type ReviewState,
   type ReviewTarget,
 } from "./types.js";
 
@@ -750,6 +751,7 @@ type GetCommentsForRun = (
 ) => ReviewComment[];
 
 type ReviewFlowStateManager = {
+  getState: () => ReviewState;
   startReviewRun: (ctx: { hasUI: boolean }, state: ReviewActiveRunInfo) => void;
   startFixRun?: (ctx: { hasUI: boolean }, state: ReviewFixRunInfo) => void;
   clearActiveRun: (ctx: { hasUI: boolean }) => void;
@@ -915,7 +917,69 @@ export function createReviewFlowController(
   dependencies: ReviewFlowDependencies,
 ): ReviewFlowController {
   let activeRun: ActiveReviewRunState | null = null;
+  let pendingLaunch: "review" | "review-fix" | null = null;
   const pendingSummaries = new Map<string, PendingSummary>();
+
+  type BlockingRun =
+    | { kind: "meta" | "review" | "fix"; runId: string }
+    | { kind: "review-launch" | "review-fix-launch" };
+
+  function activeRunKindLabel(kind: BlockingRun["kind"]): string {
+    switch (kind) {
+      case "meta":
+        return "review prompt meta-pass";
+      case "review":
+        return "review";
+      case "fix":
+        return "review-fix";
+      case "review-launch":
+        return "review launch";
+      case "review-fix-launch":
+        return "review-fix launch";
+    }
+  }
+
+  function getBlockingActiveRun(): BlockingRun | undefined {
+    const state = dependencies.stateManager.getState();
+    if (state.activeKind !== null) {
+      return { kind: state.activeKind, runId: state.runId };
+    }
+
+    if (activeRun !== null) {
+      return { kind: activeRun.kind, runId: activeRun.runId };
+    }
+
+    if (pendingLaunch !== null) {
+      return { kind: `${pendingLaunch}-launch` };
+    }
+
+    return undefined;
+  }
+
+  function describeBlockingRun(blockingRun: BlockingRun): string {
+    const label = activeRunKindLabel(blockingRun.kind);
+    if ("runId" in blockingRun) {
+      return `${label} ${blockingRun.runId} is still active.`;
+    }
+
+    return `${label} is already in progress.`;
+  }
+
+  function notifyIfActiveRun(
+    ctx: ExtensionCommandContext,
+    commandName: "review" | "review-fix",
+  ): boolean {
+    const blockingRun = getBlockingActiveRun();
+    if (blockingRun === undefined) {
+      return false;
+    }
+
+    ctx.ui.notify(
+      `Cannot start ${commandName}: pi-review-code ${describeBlockingRun(blockingRun)}`,
+      "error",
+    );
+    return true;
+  }
 
   function buildDraftOptions(
     resolvedTarget: ResolvedReviewTarget,
@@ -1132,15 +1196,36 @@ export function createReviewFlowController(
       return;
     }
 
-    if (dependencies.showInputWidget === undefined) {
-      if (args.trim().length === 0) {
-        ctx.ui.notify(REVIEW_WIDGET_HELP_TEXT, "info");
+    if (notifyIfActiveRun(ctx, "review")) {
+      return;
+    }
+
+    pendingLaunch = "review";
+    try {
+      if (dependencies.showInputWidget === undefined) {
+        if (args.trim().length === 0) {
+          ctx.ui.notify(REVIEW_WIDGET_HELP_TEXT, "info");
+          return;
+        }
+
+        let command: { target: ReviewTarget };
+        try {
+          command = parseReviewArgs(args);
+        } catch (error) {
+          ctx.ui.notify(
+            getErrorMessage(error, REVIEW_WIDGET_INVALID_ARGS_ERROR),
+            "error",
+          );
+          return;
+        }
+
+        await launchReview(command.target, ctx);
         return;
       }
 
-      let command: { target: ReviewTarget };
+      let prefill: ReturnType<typeof parseUnifiedReviewArgs>;
       try {
-        command = parseReviewArgs(args);
+        prefill = parseUnifiedReviewArgs(args);
       } catch (error) {
         ctx.ui.notify(
           getErrorMessage(error, REVIEW_WIDGET_INVALID_ARGS_ERROR),
@@ -1149,47 +1234,35 @@ export function createReviewFlowController(
         return;
       }
 
-      await launchReview(command.target, ctx);
-      return;
-    }
+      if (ctx.model === undefined) {
+        ctx.ui.notify(REVIEW_NO_ACTIVE_MODEL_ERROR, "error");
+        return;
+      }
 
-    let prefill: ReturnType<typeof parseUnifiedReviewArgs>;
-    try {
-      prefill = parseUnifiedReviewArgs(args);
-    } catch (error) {
-      ctx.ui.notify(
-        getErrorMessage(error, REVIEW_WIDGET_INVALID_ARGS_ERROR),
-        "error",
+      const input = await dependencies.showInputWidget(
+        ctx,
+        buildWidgetConfig(prefill),
       );
-      return;
-    }
+      if (input.submitted === false) {
+        ctx.ui.notify(REVIEW_WIDGET_CANCELLED_MESSAGE, "info");
+        return;
+      }
 
-    if (ctx.model === undefined) {
-      ctx.ui.notify(REVIEW_NO_ACTIVE_MODEL_ERROR, "error");
-      return;
-    }
+      let target: ReviewTarget;
+      try {
+        target = buildTargetFromWidgetInput(input);
+      } catch (error) {
+        ctx.ui.notify(
+          getErrorMessage(error, REVIEW_WIDGET_INVALID_ARGS_ERROR),
+          "error",
+        );
+        return;
+      }
 
-    const input = await dependencies.showInputWidget(
-      ctx,
-      buildWidgetConfig(prefill),
-    );
-    if (input.submitted === false) {
-      ctx.ui.notify(REVIEW_WIDGET_CANCELLED_MESSAGE, "info");
-      return;
+      await launchReview(target, ctx);
+    } finally {
+      pendingLaunch = null;
     }
-
-    let target: ReviewTarget;
-    try {
-      target = buildTargetFromWidgetInput(input);
-    } catch (error) {
-      ctx.ui.notify(
-        getErrorMessage(error, REVIEW_WIDGET_INVALID_ARGS_ERROR),
-        "error",
-      );
-      return;
-    }
-
-    await launchReview(target, ctx);
   }
 
   async function startFixRunIfSupported(
@@ -1275,123 +1348,132 @@ export function createReviewFlowController(
       return;
     }
 
-    if (args.trim().length > 0) {
-      ctx.ui.notify(REVIEW_FIX_BARE_HELP_MESSAGE, "info");
+    if (notifyIfActiveRun(ctx, "review-fix")) {
       return;
     }
 
-    if (dependencies.showFixWidget === undefined) {
-      ctx.ui.notify(REVIEW_FIX_USAGE, "info");
-      return;
-    }
+    pendingLaunch = "review-fix";
+    try {
+      if (args.trim().length > 0) {
+        ctx.ui.notify(REVIEW_FIX_BARE_HELP_MESSAGE, "info");
+        return;
+      }
 
-    const widgetData = buildReviewFixWidgetData(
-      ctx.sessionManager.getEntries(),
-    );
-    const selectedResult = await dependencies.showFixWidget(ctx, {
-      title: REVIEW_FIX_WIDGET_TITLE,
-      helpText: REVIEW_FIX_WIDGET_HELP_TEXT,
-      ...(widgetData.ok
-        ? {
-            reviewRunId: widgetData.reviewRunId,
-            targetHint: widgetData.targetHint,
-            completedAt: widgetData.completedAt,
-          }
-        : {}),
-      findings: widgetData.findings.map((finding) => ({
-        id: finding.comment.id,
-        priority: finding.comment.priority,
-        comment: finding.comment.comment,
-        references: finding.comment.references,
-        fixed: finding.fixed,
-        reviewRunId: finding.reviewRunId,
-        targetHint: finding.targetHint,
-        completedAt: finding.completedAt,
-      })),
-    });
+      if (dependencies.showFixWidget === undefined) {
+        ctx.ui.notify(REVIEW_FIX_USAGE, "info");
+        return;
+      }
 
-    if (selectedResult.submitted === false) {
-      ctx.ui.notify(REVIEW_FIX_WIDGET_CANCELLED_MESSAGE, "info");
-      return;
-    }
-
-    const revalidated = buildSelectedReviewSummaryForWidgetResult(
-      ctx.sessionManager.getEntries(),
-      selectedResult,
-    );
-
-    if (revalidated === undefined) {
-      ctx.ui.notify(REVIEW_FIX_REVALIDATE_ERROR, "error");
-      return;
-    }
-
-    const model = ctx.model;
-    if (model === undefined) {
-      ctx.ui.notify(
-        "Cannot start review-fix: no active model is selected.",
-        "error",
+      const widgetData = buildReviewFixWidgetData(
+        ctx.sessionManager.getEntries(),
       );
-      return;
-    }
+      const selectedResult = await dependencies.showFixWidget(ctx, {
+        title: REVIEW_FIX_WIDGET_TITLE,
+        helpText: REVIEW_FIX_WIDGET_HELP_TEXT,
+        ...(widgetData.ok
+          ? {
+              reviewRunId: widgetData.reviewRunId,
+              targetHint: widgetData.targetHint,
+              completedAt: widgetData.completedAt,
+            }
+          : {}),
+        findings: widgetData.findings.map((finding) => ({
+          id: finding.comment.id,
+          priority: finding.comment.priority,
+          comment: finding.comment.comment,
+          references: finding.comment.references,
+          fixed: finding.fixed,
+          reviewRunId: finding.reviewRunId,
+          targetHint: finding.targetHint,
+          completedAt: finding.completedAt,
+        })),
+      });
 
-    await ctx.waitForIdle();
+      if (selectedResult.submitted === false) {
+        ctx.ui.notify(REVIEW_FIX_WIDGET_CANCELLED_MESSAGE, "info");
+        return;
+      }
 
-    const originLeafId = getLeafId(ctx);
-    if (originLeafId === null) {
-      ctx.ui.notify(
-        "Cannot start review-fix: no current branch leaf id.",
-        "error",
+      const revalidated = buildSelectedReviewSummaryForWidgetResult(
+        ctx.sessionManager.getEntries(),
+        selectedResult,
       );
-      return;
+
+      if (revalidated === undefined) {
+        ctx.ui.notify(REVIEW_FIX_REVALIDATE_ERROR, "error");
+        return;
+      }
+
+      const model = ctx.model;
+      if (model === undefined) {
+        ctx.ui.notify(
+          "Cannot start review-fix: no active model is selected.",
+          "error",
+        );
+        return;
+      }
+
+      await ctx.waitForIdle();
+
+      const originLeafId = getLeafId(ctx);
+      if (originLeafId === null) {
+        ctx.ui.notify(
+          "Cannot start review-fix: no current branch leaf id.",
+          "error",
+        );
+        return;
+      }
+
+      const optionalFixContext = withFixContext(selectedResult.fixContext);
+      const fixContext = optionalFixContext.fixContext;
+
+      const fixPrompt = buildReviewFixPrompt({
+        reviewRunId: revalidated.runId,
+        targetHint: revalidated.targetHint,
+        comments: revalidated.comments,
+        fixContext,
+      });
+
+      const thinkingLevel = dependencies.getThinkingLevel();
+      const fixRunInfo: ReviewFixRunInfo = {
+        runId: dependencies.createRunId(),
+        originLeafId,
+        targetHint: revalidated.targetHint,
+        reviewPrompt: fixPrompt,
+        originModelProvider: model.provider,
+        originModelId: model.id,
+        originThinkingLevel: thinkingLevel,
+        sourceReviewRunId: revalidated.runId,
+        commentIds: revalidated.comments.map((comment) => comment.id),
+        ...optionalFixContext,
+      };
+
+      await startFixRunIfSupported(ctx, fixRunInfo);
+
+      activeRun = {
+        ...fixRunInfo,
+        kind: "fix",
+        commandCtx: ctx,
+        selectedComments: revalidated.comments,
+      };
+      sendPromptMessage(dependencies.pi, {
+        kind: "prompt",
+        mode: "fix",
+        runId: fixRunInfo.runId,
+        targetHint: fixRunInfo.targetHint,
+        reviewPrompt: fixRunInfo.reviewPrompt,
+        originModelProvider: fixRunInfo.originModelProvider,
+        originModelId: fixRunInfo.originModelId,
+        originThinkingLevel: fixRunInfo.originThinkingLevel,
+        sourceReviewRunId: fixRunInfo.sourceReviewRunId,
+        commentIds: fixRunInfo.commentIds,
+        ...optionalFixContext,
+      });
+      ctx.ui.notify(`Fix branch started: ${fixRunInfo.runId}`, "info");
+      dependencies.pi.sendUserMessage(fixPrompt);
+    } finally {
+      pendingLaunch = null;
     }
-
-    const optionalFixContext = withFixContext(selectedResult.fixContext);
-    const fixContext = optionalFixContext.fixContext;
-
-    const fixPrompt = buildReviewFixPrompt({
-      reviewRunId: revalidated.runId,
-      targetHint: revalidated.targetHint,
-      comments: revalidated.comments,
-      fixContext,
-    });
-
-    const thinkingLevel = dependencies.getThinkingLevel();
-    const fixRunInfo: ReviewFixRunInfo = {
-      runId: dependencies.createRunId(),
-      originLeafId,
-      targetHint: revalidated.targetHint,
-      reviewPrompt: fixPrompt,
-      originModelProvider: model.provider,
-      originModelId: model.id,
-      originThinkingLevel: thinkingLevel,
-      sourceReviewRunId: revalidated.runId,
-      commentIds: revalidated.comments.map((comment) => comment.id),
-      ...optionalFixContext,
-    };
-
-    await startFixRunIfSupported(ctx, fixRunInfo);
-
-    activeRun = {
-      ...fixRunInfo,
-      kind: "fix",
-      commandCtx: ctx,
-      selectedComments: revalidated.comments,
-    };
-    sendPromptMessage(dependencies.pi, {
-      kind: "prompt",
-      mode: "fix",
-      runId: fixRunInfo.runId,
-      targetHint: fixRunInfo.targetHint,
-      reviewPrompt: fixRunInfo.reviewPrompt,
-      originModelProvider: fixRunInfo.originModelProvider,
-      originModelId: fixRunInfo.originModelId,
-      originThinkingLevel: fixRunInfo.originThinkingLevel,
-      sourceReviewRunId: fixRunInfo.sourceReviewRunId,
-      commentIds: fixRunInfo.commentIds,
-      ...optionalFixContext,
-    });
-    ctx.ui.notify(`Fix branch started: ${fixRunInfo.runId}`, "info");
-    dependencies.pi.sendUserMessage(fixPrompt);
   }
 
   return {
