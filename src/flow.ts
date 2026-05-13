@@ -924,20 +924,13 @@ export function createReviewFlowController(
     | { kind: "meta" | "review" | "fix"; runId: string }
     | { kind: "review-launch" | "review-fix-launch" };
 
-  function activeRunKindLabel(kind: BlockingRun["kind"]): string {
-    switch (kind) {
-      case "meta":
-        return "review prompt meta-pass";
-      case "review":
-        return "review";
-      case "fix":
-        return "review-fix";
-      case "review-launch":
-        return "review launch";
-      case "review-fix-launch":
-        return "review-fix launch";
-    }
-  }
+  const BLOCKING_RUN_LABELS = {
+    meta: "review prompt meta-pass",
+    review: "review",
+    fix: "review-fix",
+    "review-launch": "review launch",
+    "review-fix-launch": "review-fix launch",
+  } as const satisfies Record<BlockingRun["kind"], string>;
 
   function getBlockingActiveRun(): BlockingRun | undefined {
     const state = dependencies.stateManager.getState();
@@ -957,12 +950,24 @@ export function createReviewFlowController(
   }
 
   function describeBlockingRun(blockingRun: BlockingRun): string {
-    const label = activeRunKindLabel(blockingRun.kind);
+    const label = BLOCKING_RUN_LABELS[blockingRun.kind];
     if ("runId" in blockingRun) {
       return `${label} ${blockingRun.runId} is still active.`;
     }
 
     return `${label} is already in progress.`;
+  }
+
+  async function withPendingLaunch(
+    launch: NonNullable<typeof pendingLaunch>,
+    action: () => Promise<void>,
+  ): Promise<void> {
+    pendingLaunch = launch;
+    try {
+      await action();
+    } finally {
+      pendingLaunch = null;
+    }
   }
 
   function notifyIfActiveRun(
@@ -1200,8 +1205,7 @@ export function createReviewFlowController(
       return;
     }
 
-    pendingLaunch = "review";
-    try {
+    await withPendingLaunch("review", async () => {
       if (dependencies.showInputWidget === undefined) {
         if (args.trim().length === 0) {
           ctx.ui.notify(REVIEW_WIDGET_HELP_TEXT, "info");
@@ -1260,9 +1264,7 @@ export function createReviewFlowController(
       }
 
       await launchReview(target, ctx);
-    } finally {
-      pendingLaunch = null;
-    }
+    });
   }
 
   async function startFixRunIfSupported(
@@ -1352,8 +1354,7 @@ export function createReviewFlowController(
       return;
     }
 
-    pendingLaunch = "review-fix";
-    try {
+    await withPendingLaunch("review-fix", async () => {
       if (args.trim().length > 0) {
         ctx.ui.notify(REVIEW_FIX_BARE_HELP_MESSAGE, "info");
         return;
@@ -1471,9 +1472,7 @@ export function createReviewFlowController(
       });
       ctx.ui.notify(`Fix branch started: ${fixRunInfo.runId}`, "info");
       dependencies.pi.sendUserMessage(fixPrompt);
-    } finally {
-      pendingLaunch = null;
-    }
+    });
   }
 
   return {
