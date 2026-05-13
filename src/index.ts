@@ -216,6 +216,9 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
 
     stateManager.refresh(ctx);
   });
+  pi.on("before_agent_start", (event, ctx) =>
+    controller.handleBeforeAgentStart(event, ctx),
+  );
   pi.on("agent_end", (event, ctx) => controller.handleAgentEnd(event, ctx));
   pi.on("session_before_tree", (event) =>
     controller.handleSessionBeforeTree(event),

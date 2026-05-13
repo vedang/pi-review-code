@@ -21,7 +21,10 @@ import type {
   ReviewPromptDraftOptions,
   ReviewPromptDraftRequest,
 } from "./prompts.js";
-import { buildReviewFixPrompt } from "./prompts.js";
+import {
+  buildReviewFixPrompt,
+  buildReviewMetaSystemPrompt,
+} from "./prompts.js";
 import type {
   ReviewFixWidgetConfig,
   ReviewFixWidgetResult,
@@ -727,6 +730,10 @@ type ReviewFlowController = {
     args: string,
     ctx: ExtensionCommandContext,
   ) => Promise<void>;
+  handleBeforeAgentStart: (
+    event: { prompt: string; systemPrompt: string; type?: string },
+    ctx: ExtensionContext,
+  ) => Promise<{ systemPrompt: string } | undefined>;
   handleAgentEnd: (event: unknown, ctx: ExtensionContext) => Promise<void>;
   handleSessionBeforeTree: (
     event: Pick<SessionBeforeTreeEvent, "preparation">,
@@ -1342,6 +1349,36 @@ export function createReviewFlowController(
     };
   }
 
+  async function handleBeforeAgentStart(
+    event: { prompt: string; systemPrompt: string; type?: string },
+    ctx: ExtensionContext,
+  ): Promise<{ systemPrompt: string } | undefined> {
+    const state = dependencies.stateManager.getState();
+    if (state.activeKind !== "meta") {
+      return undefined;
+    }
+
+    if (event.prompt !== state.metaPrompt) {
+      dependencies.stateManager.clearActiveRun(ctx);
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `Abandoned pi-review-code review prompt meta-pass ${state.runId}: next turn did not match the meta-pass prompt.`,
+          "warning",
+        );
+      }
+      return undefined;
+    }
+
+    const metaSystemPrompt = buildReviewMetaSystemPrompt({
+      runId: state.runId,
+      targetHint: state.targetHint,
+    });
+
+    return {
+      systemPrompt: `${event.systemPrompt}\n\n${metaSystemPrompt}`,
+    };
+  }
+
   async function handleReviewFixCommand(
     args: string,
     ctx: ExtensionCommandContext,
@@ -1478,6 +1515,7 @@ export function createReviewFlowController(
   return {
     handleReviewCommand,
     handleReviewFixCommand,
+    handleBeforeAgentStart,
     async handleAgentEnd(event, ctx): Promise<void> {
       if (activeRun === null) {
         return;

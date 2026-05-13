@@ -225,6 +225,14 @@ test("runtime does not register legacy selector commands", () => {
   assert.equal(harness.commands.has("review-pr"), false);
 });
 
+test("runtime registers review lifecycle hooks", () => {
+  const harness = createRuntimeHarness();
+
+  assert.ok(harness.events.has("before_agent_start"));
+  assert.ok(harness.events.has("agent_end"));
+  assert.ok(harness.events.has("session_before_tree"));
+});
+
 test("extension abandons persisted active review state on session_start", async () => {
   const harness = createRuntimeHarness();
   const handler = harness.events.get("session_start");

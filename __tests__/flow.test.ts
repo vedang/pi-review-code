@@ -362,6 +362,69 @@ test("review flow rejects persisted meta and fix runs before widget", async () =
   }
 });
 
+test("before agent start ignores non-meta review state", async () => {
+  for (const activeState of [undefined, activeFixState()] as const) {
+    const harness = createHarness({ activeState });
+
+    const result = await harness.controller.handleBeforeAgentStart(
+      {
+        type: "before_agent_start",
+        prompt: "Create review prompt",
+        systemPrompt: "base system",
+      },
+      harness.ctx,
+    );
+
+    assert.equal(result, undefined);
+    assert.deepEqual(harness.clearedRuns, []);
+    assert.deepEqual(harness.notifications, []);
+  }
+});
+
+test("before agent start injects meta system prompt for exact meta prompt", async () => {
+  const harness = createHarness({ activeState: activeMetaState() });
+
+  const result = await harness.controller.handleBeforeAgentStart(
+    {
+      type: "before_agent_start",
+      prompt: "Create review prompt",
+      systemPrompt: "base system",
+    },
+    harness.ctx,
+  );
+
+  assert.ok(result, "expected meta system prompt injection");
+  assert.match(result.systemPrompt ?? "", /^base system\n\n/);
+  assert.match(result.systemPrompt ?? "", /review prompt meta-pass/);
+  assert.match(result.systemPrompt ?? "", /meta-1/);
+  assert.match(result.systemPrompt ?? "", /Do not modify source files/);
+  assert.deepEqual(harness.clearedRuns, []);
+  assert.deepEqual(harness.notifications, []);
+});
+
+test("before agent start abandons meta state for unrelated prompt", async () => {
+  const harness = createHarness({ activeState: activeMetaState() });
+
+  const result = await harness.controller.handleBeforeAgentStart(
+    {
+      type: "before_agent_start",
+      prompt: "Unrelated manual question",
+      systemPrompt: "base system",
+    },
+    harness.ctx,
+  );
+
+  assert.equal(result, undefined);
+  assert.equal(harness.clearedRuns.length, 1);
+  assert.deepEqual(harness.notifications, [
+    {
+      message:
+        "Abandoned pi-review-code review prompt meta-pass meta-1: next turn did not match the meta-pass prompt.",
+      level: "warning",
+    },
+  ]);
+});
+
 test("review flow rejects overlapping launch while widget is pending", async () => {
   let releaseWidget: () => void = () => {};
   const inputWidgetDelay = new Promise<void>((resolve) => {
