@@ -8,6 +8,7 @@ import {
   REVIEW_STATE_VERSION,
   type ReviewComment,
   type ReviewCommentPriority,
+  type ReviewStateKind,
 } from "./types.js";
 
 export { REVIEW_COMMENT_ENTRY_TYPE };
@@ -149,13 +150,15 @@ export function normalizeAddReviewCommentInput(
   return { value: { priority, comment, references: references.value } };
 }
 
+type InactiveReviewCommentStateKind = Exclude<ReviewStateKind, "review">;
+
 export type AddReviewCommentSourceState =
   | {
       activeKind: "review";
       runId: string;
       targetHint: string;
     }
-  | { activeKind: "meta" | "fix" | null };
+  | { activeKind: InactiveReviewCommentStateKind };
 
 export type AddReviewCommentSource = {
   getState: () => AddReviewCommentSourceState;

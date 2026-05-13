@@ -31,9 +31,11 @@ import {
   REVIEW_COMMENT_PRIORITIES,
   REVIEW_STATE_VERSION,
   type ResolvedReviewTarget,
+  type ReviewActiveRunInfo,
   type ReviewComment,
   type ReviewFixRunInfo,
   type ReviewMetaResult,
+  type ReviewMetaRunInfo,
   type ReviewTarget,
 } from "./types.js";
 
@@ -45,14 +47,11 @@ export const REVIEW_FIX_SUMMARY_ENTRY_TYPE =
 export const REVIEW_META_PROMPT_ENTRY_TYPE = "pi-review-code:meta-prompt";
 export const REVIEW_META_SUMMARY_ENTRY_TYPE = "pi-review-code:meta-summary";
 
-export type ReviewMetaPromptMessageDetails = {
+type ReviewPromptRunDetails = Omit<ReviewActiveRunInfo, "originLeafId">;
+type ReviewMetaPromptRunDetails = Omit<ReviewMetaRunInfo, "originLeafId">;
+
+export type ReviewMetaPromptMessageDetails = ReviewMetaPromptRunDetails & {
   kind: "meta-prompt";
-  runId: string;
-  targetHint: string;
-  metaPrompt: string;
-  originModelProvider: string;
-  originModelId: string;
-  originThinkingLevel: string;
 };
 
 export type BuildReviewMetaBranchSummaryInput = {
@@ -100,15 +99,9 @@ export type ReviewBranchSummary = {
   details: ReviewBranchSummaryDetails;
 };
 
-export type ReviewPromptMessageDetails = {
+export type ReviewPromptMessageDetails = ReviewPromptRunDetails & {
   kind: "prompt";
   mode: "review" | "fix";
-  runId: string;
-  targetHint: string;
-  reviewPrompt: string;
-  originModelProvider: string;
-  originModelId: string;
-  originThinkingLevel: string;
   sourceReviewRunId?: string;
   commentIds?: string[];
   fixContext?: string;
@@ -757,7 +750,7 @@ type GetCommentsForRun = (
 ) => ReviewComment[];
 
 type ReviewFlowStateManager = {
-  startReviewRun: (ctx: { hasUI: boolean }, state: ReviewRunInfo) => void;
+  startReviewRun: (ctx: { hasUI: boolean }, state: ReviewActiveRunInfo) => void;
   startFixRun?: (ctx: { hasUI: boolean }, state: ReviewFixRunInfo) => void;
   clearActiveRun: (ctx: { hasUI: boolean }) => void;
 };
@@ -783,17 +776,7 @@ type ReviewFlowDependencies = {
   showFixWidget?: ShowFixWidget;
 };
 
-type ReviewRunInfo = {
-  runId: string;
-  originLeafId: string;
-  targetHint: string;
-  reviewPrompt: string;
-  originModelProvider: string;
-  originModelId: string;
-  originThinkingLevel: string;
-};
-
-type ActiveReviewRun = ReviewRunInfo & {
+type ActiveReviewRun = ReviewActiveRunInfo & {
   kind: "review";
   commandCtx: ExtensionCommandContext;
 };
@@ -1013,7 +996,7 @@ export function createReviewFlowController(
       return;
     }
 
-    const runInfo: ReviewRunInfo = {
+    const runInfo: ReviewActiveRunInfo = {
       runId: dependencies.createRunId(),
       originLeafId,
       targetHint: resolvedTarget.targetHint,

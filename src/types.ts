@@ -41,24 +41,24 @@ export interface ReviewStateBase {
   activeKind: ReviewStateKind;
 }
 
-export interface ReviewMetaRunInfo {
-  runId: string;
+export interface ReviewRunOriginInfo {
   originLeafId: string;
-  targetHint: string;
-  metaPrompt: string;
   originModelProvider: string;
   originModelId: string;
   originThinkingLevel: string;
 }
 
-export interface ReviewActiveRunInfo {
+export interface ReviewRunTargetInfo extends ReviewRunOriginInfo {
   runId: string;
-  originLeafId: string;
   targetHint: string;
+}
+
+export interface ReviewMetaRunInfo extends ReviewRunTargetInfo {
+  metaPrompt: string;
+}
+
+export interface ReviewActiveRunInfo extends ReviewRunTargetInfo {
   reviewPrompt: string;
-  originModelProvider: string;
-  originModelId: string;
-  originThinkingLevel: string;
 }
 
 export interface ReviewFixRunInfo extends ReviewActiveRunInfo {
