@@ -776,6 +776,14 @@ type ReviewFlowDependencies = {
   showFixWidget?: ShowFixWidget;
 };
 
+type ReviewLaunchContext = {
+  model: NonNullable<ExtensionCommandContext["model"]>;
+  originLeafId: string;
+  resolvedTarget: ResolvedReviewTarget;
+  draftOptions: ReviewPromptDraftOptions;
+  thinkingLevel: PiReviewThinkingLevel;
+};
+
 type ActiveReviewRun = ReviewActiveRunInfo & {
   kind: "review";
   commandCtx: ExtensionCommandContext;
@@ -909,56 +917,10 @@ export function createReviewFlowController(
   let activeRun: ActiveReviewRunState | null = null;
   const pendingSummaries = new Map<string, PendingSummary>();
 
-  async function launchReview(
-    target: ReviewTarget,
-    ctx: ExtensionCommandContext,
-  ) {
-    const model = ctx.model;
-    if (model === undefined) {
-      ctx.ui.notify(
-        "Cannot start review: no active model is selected.",
-        "error",
-      );
-      return;
-    }
-
-    await ctx.waitForIdle();
-
-    const originLeafId = ensureOriginLeafId(ctx, dependencies.pi);
-    if (originLeafId === null) {
-      ctx.ui.notify("Cannot start review: no current branch leaf id.", "error");
-      return;
-    }
-
-    let resolvedTarget: ResolvedReviewTarget;
-    try {
-      resolvedTarget = await dependencies.resolveTarget(target);
-    } catch (error) {
-      ctx.ui.notify(
-        error instanceof Error
-          ? error.message
-          : "Failed to resolve review target.",
-        "error",
-      );
-      return;
-    }
-
-    let reviewGuidelines: string | undefined;
-    if (dependencies.readReviewGuidelines !== undefined) {
-      try {
-        reviewGuidelines = await dependencies.readReviewGuidelines();
-      } catch (error) {
-        ctx.ui.notify(
-          error instanceof Error
-            ? error.message
-            : "Failed to load repository review guidelines.",
-          "error",
-        );
-        return;
-      }
-    }
-
-    const thinkingLevel = dependencies.getThinkingLevel();
+  function buildDraftOptions(
+    resolvedTarget: ResolvedReviewTarget,
+    reviewGuidelines?: string,
+  ): ReviewPromptDraftOptions {
     const draftOptions: ReviewPromptDraftOptions = {};
     if (
       resolvedTarget.kind === "diff-against" &&
@@ -972,38 +934,108 @@ export function createReviewFlowController(
       draftOptions.reviewGuidelines = normalizedReviewGuidelines;
     }
 
-    const draftRequest = dependencies.buildDraftRequest(
+    return draftOptions;
+  }
+
+  function optionalDraftOptions(
+    draftOptions: ReviewPromptDraftOptions,
+  ): ReviewPromptDraftOptions | undefined {
+    return Object.keys(draftOptions).length === 0 ? undefined : draftOptions;
+  }
+
+  async function resolveReviewLaunchContext(
+    target: ReviewTarget,
+    ctx: ExtensionCommandContext,
+  ): Promise<ReviewLaunchContext | undefined> {
+    const model = ctx.model;
+    if (model === undefined) {
+      ctx.ui.notify(REVIEW_NO_ACTIVE_MODEL_ERROR, "error");
+      return undefined;
+    }
+
+    await ctx.waitForIdle();
+
+    const originLeafId = ensureOriginLeafId(ctx, dependencies.pi);
+    if (originLeafId === null) {
+      ctx.ui.notify("Cannot start review: no current branch leaf id.", "error");
+      return undefined;
+    }
+
+    let resolvedTarget: ResolvedReviewTarget;
+    try {
+      resolvedTarget = await dependencies.resolveTarget(target);
+    } catch (error) {
+      ctx.ui.notify(
+        error instanceof Error
+          ? error.message
+          : "Failed to resolve review target.",
+        "error",
+      );
+      return undefined;
+    }
+
+    let reviewGuidelines: string | undefined;
+    if (dependencies.readReviewGuidelines !== undefined) {
+      try {
+        reviewGuidelines = await dependencies.readReviewGuidelines();
+      } catch (error) {
+        ctx.ui.notify(
+          error instanceof Error
+            ? error.message
+            : "Failed to load repository review guidelines.",
+          "error",
+        );
+        return undefined;
+      }
+    }
+
+    return {
+      model,
+      originLeafId,
       resolvedTarget,
-      Object.keys(draftOptions).length === 0 ? undefined : draftOptions,
+      draftOptions: buildDraftOptions(resolvedTarget, reviewGuidelines),
+      thinkingLevel: dependencies.getThinkingLevel(),
+    };
+  }
+
+  async function generateReviewPromptDraft(
+    launchContext: ReviewLaunchContext,
+    ctx: ExtensionCommandContext,
+  ): Promise<string | undefined> {
+    const draftRequest = dependencies.buildDraftRequest(
+      launchContext.resolvedTarget,
+      optionalDraftOptions(launchContext.draftOptions),
     );
     ctx.ui.notify("Generating review prompt draft…", "info");
 
     const draft = await dependencies.generateDraft(draftRequest, {
-      model,
+      model: launchContext.model,
       modelRegistry: ctx.modelRegistry,
-      thinkingLevel,
+      thinkingLevel: launchContext.thinkingLevel,
       signal: ctx.signal,
     });
 
     if (!draft.ok) {
       ctx.ui.notify(draft.error, "error");
-      return;
+      return undefined;
     }
 
-    const editedPrompt = await ctx.ui.editor("Edit review prompt", draft.draft);
-    if (editedPrompt === undefined) {
-      ctx.ui.notify("Review cancelled before branch launch.", "info");
-      return;
-    }
+    return draft.draft;
+  }
 
+  function startReviewFromPrompt(
+    launchContext: ReviewLaunchContext,
+    ctx: ExtensionCommandContext,
+    reviewPrompt: string,
+  ): void {
     const runInfo: ReviewActiveRunInfo = {
       runId: dependencies.createRunId(),
-      originLeafId,
-      targetHint: resolvedTarget.targetHint,
-      reviewPrompt: editedPrompt,
-      originModelProvider: model.provider,
-      originModelId: model.id,
-      originThinkingLevel: thinkingLevel,
+      originLeafId: launchContext.originLeafId,
+      targetHint: launchContext.resolvedTarget.targetHint,
+      reviewPrompt,
+      originModelProvider: launchContext.model.provider,
+      originModelId: launchContext.model.id,
+      originThinkingLevel: launchContext.thinkingLevel,
     };
 
     dependencies.stateManager.startReviewRun(ctx, runInfo);
@@ -1020,7 +1052,30 @@ export function createReviewFlowController(
     });
 
     ctx.ui.notify(`Review branch started: ${runInfo.runId}`, "info");
-    dependencies.pi.sendUserMessage(editedPrompt);
+    dependencies.pi.sendUserMessage(reviewPrompt);
+  }
+
+  async function launchReview(
+    target: ReviewTarget,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> {
+    const launchContext = await resolveReviewLaunchContext(target, ctx);
+    if (launchContext === undefined) {
+      return;
+    }
+
+    const draft = await generateReviewPromptDraft(launchContext, ctx);
+    if (draft === undefined) {
+      return;
+    }
+
+    const editedPrompt = await ctx.ui.editor("Edit review prompt", draft);
+    if (editedPrompt === undefined) {
+      ctx.ui.notify("Review cancelled before branch launch.", "info");
+      return;
+    }
+
+    startReviewFromPrompt(launchContext, ctx, editedPrompt);
   }
 
   function buildWidgetConfig(prefill: {
