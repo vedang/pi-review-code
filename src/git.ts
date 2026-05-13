@@ -80,6 +80,19 @@ function gitDiff(
   };
 }
 
+function nonEmpty(value: string): string | null {
+  return value.length > 0 ? value : null;
+}
+
+function remoteBookmarkRef(value: string): string | null {
+  const slash = value.indexOf("/");
+  if (slash <= 0 || slash >= value.length - 1) {
+    return null;
+  }
+
+  return `${value.slice(slash + 1)}@${value.slice(0, slash)}`;
+}
+
 function translateGitRefForJj(ref: string): string | null {
   if (
     ref.includes("@") ||
@@ -90,34 +103,18 @@ function translateGitRefForJj(ref: string): string | null {
   }
 
   if (ref.startsWith(GIT_REMOTE_REF_PREFIX)) {
-    const remainder = ref.slice(GIT_REMOTE_REF_PREFIX.length);
-    const slash = remainder.indexOf("/");
-    if (slash <= 0 || slash >= remainder.length - 1) {
-      return null;
-    }
-    const remote = remainder.slice(0, slash);
-    const branch = remainder.slice(slash + 1);
-    return `${branch}@${remote}`;
+    return remoteBookmarkRef(ref.slice(GIT_REMOTE_REF_PREFIX.length));
   }
 
   if (ref.startsWith(GIT_HEADS_REF_PREFIX)) {
-    const branch = ref.slice(GIT_HEADS_REF_PREFIX.length);
-    return branch.length > 0 ? branch : null;
+    return nonEmpty(ref.slice(GIT_HEADS_REF_PREFIX.length));
   }
 
   if (ref.startsWith(GIT_TAGS_REF_PREFIX)) {
-    const tag = ref.slice(GIT_TAGS_REF_PREFIX.length);
-    return tag.length > 0 ? tag : null;
+    return nonEmpty(ref.slice(GIT_TAGS_REF_PREFIX.length));
   }
 
-  const slash = ref.indexOf("/");
-  if (slash === -1 || slash === ref.length - 1) {
-    return null;
-  }
-
-  const remote = ref.slice(0, slash);
-  const branch = ref.slice(slash + 1);
-  return `${branch}@${remote}`;
+  return remoteBookmarkRef(ref);
 }
 
 export function buildJjDiffRefCandidates(ref: string): string[] {

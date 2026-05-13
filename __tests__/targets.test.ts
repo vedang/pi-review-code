@@ -64,6 +64,16 @@ function jjDiffCommandHints(ref: string) {
   ] as const;
 }
 
+type ExecResult = Awaited<ReturnType<ExecCommand>>;
+
+function execOk(stdout: string): ExecResult {
+  return { stdout, stderr: "", exitCode: 0 };
+}
+
+function execFailed(stderr: string, exitCode = 128): ExecResult {
+  return { stdout: "", stderr, exitCode };
+}
+
 function fakeExec(responses: Record<string, string>): ExecCommand {
   return async (command, args) => {
     const key = commandKey(command, args);
@@ -71,7 +81,7 @@ function fakeExec(responses: Record<string, string>): ExecCommand {
     if (stdout === undefined) {
       throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
     }
-    return { stdout, stderr: "", exitCode: 0 };
+    return execOk(stdout);
   };
 }
 
@@ -90,7 +100,7 @@ function recordingExec(responses: Record<string, string>): {
       if (stdout === undefined) {
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       }
-      return { stdout, stderr: "", exitCode: 0 };
+      return execOk(stdout);
     },
   };
 }
@@ -147,28 +157,18 @@ for (const scenario of [
             if (scenario.name === "when git exec throws") {
               throw new Error("spawn git ENOENT");
             }
-            return {
-              stdout: "",
-              stderr: "fatal: not a git repository",
-              exitCode: 128,
-            };
+            return execFailed("fatal: not a git repository");
           }
           if (call === jjListCommand) {
-            return {
-              stdout: `${scenario.filePath}\n`,
-              stderr: "",
-              exitCode: 0,
-            };
+            return execOk(`${scenario.filePath}\n`);
           }
           if (call === jjStatCommand) {
-            return { stdout: "1 file changed", stderr: "", exitCode: 0 };
+            return execOk("1 file changed");
           }
           if (call === jjDiffCommand) {
-            return {
-              stdout: `diff --git a/${scenario.filePath} b/${scenario.filePath}\n`,
-              stderr: "",
-              exitCode: 0,
-            };
+            return execOk(
+              `diff --git a/${scenario.filePath} b/${scenario.filePath}\n`,
+            );
           }
           throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
         },
@@ -212,32 +212,23 @@ test("resolveReviewTarget falls back to jj remote bookmark for origin/main", asy
         const call = commandKey(command, args);
         calls.push(call);
         if (command === "git") {
-          return {
-            stdout: "",
-            stderr:
-              "fatal: ambiguous argument 'origin/main...HEAD': unknown revision or path not in the working tree.",
-            exitCode: 128,
-          };
+          return execFailed(
+            "fatal: ambiguous argument 'origin/main...HEAD': unknown revision or path not in the working tree.",
+          );
         }
         if (call === originalJjListCommand || call === originalJjStatCommand) {
-          return {
-            stdout: "",
-            stderr: "Error: Revision `origin/main` doesn't exist",
-            exitCode: 1,
-          };
+          return execFailed("Error: Revision `origin/main` doesn't exist", 1);
         }
         if (call === translatedJjListCommand) {
-          return { stdout: "src/changed.ts\n", stderr: "", exitCode: 0 };
+          return execOk("src/changed.ts\n");
         }
         if (call === translatedJjStatCommand) {
-          return { stdout: "1 file changed", stderr: "", exitCode: 0 };
+          return execOk("1 file changed");
         }
         if (call === translatedJjDiffCommand) {
-          return {
-            stdout: "diff --git a/src/changed.ts b/src/changed.ts\n+new code\n",
-            stderr: "",
-            exitCode: 0,
-          };
+          return execOk(
+            "diff --git a/src/changed.ts b/src/changed.ts\n+new code\n",
+          );
         }
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       },
@@ -279,25 +270,18 @@ test("resolveReviewTarget keeps slash-named jj refs before translating", async (
         const call = commandKey(command, args);
         calls.push(call);
         if (command === "git") {
-          return {
-            stdout: "",
-            stderr: "fatal: not a git repository",
-            exitCode: 128,
-          };
+          return execFailed("fatal: not a git repository");
         }
         if (call === jjListCommand) {
-          return { stdout: "src/native-jj.ts\n", stderr: "", exitCode: 0 };
+          return execOk("src/native-jj.ts\n");
         }
         if (call === jjStatCommand) {
-          return { stdout: "1 file changed", stderr: "", exitCode: 0 };
+          return execOk("1 file changed");
         }
         if (call === jjDiffCommand) {
-          return {
-            stdout:
-              "diff --git a/src/native-jj.ts b/src/native-jj.ts\n+native jj\n",
-            stderr: "",
-            exitCode: 0,
-          };
+          return execOk(
+            "diff --git a/src/native-jj.ts b/src/native-jj.ts\n+native jj\n",
+          );
         }
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       },

@@ -170,6 +170,21 @@ async function resolveDiffAgainstCommands(
   };
 }
 
+async function resolveDiffAgainstBackend(
+  backend: DiffAgainstBackend,
+  ref: string,
+  context: { exec: ExecCommand },
+): Promise<{
+  commands: DiffAgainstCommands;
+  resolvedDiff: DiffAgainstResolution;
+}> {
+  const commands = buildDiffAgainstCommands(backend, ref);
+  return {
+    commands,
+    resolvedDiff: await resolveDiffAgainstCommands(commands, context),
+  };
+}
+
 async function resolveDiffAgainstWithFallback(
   ref: string,
   context: { exec: ExecCommand },
@@ -177,21 +192,13 @@ async function resolveDiffAgainstWithFallback(
   commands: DiffAgainstCommands;
   resolvedDiff: DiffAgainstResolution;
 }> {
-  const gitCommands = buildDiffAgainstCommands("git", ref);
   try {
-    return {
-      commands: gitCommands,
-      resolvedDiff: await resolveDiffAgainstCommands(gitCommands, context),
-    };
+    return await resolveDiffAgainstBackend("git", ref, context);
   } catch {
     let lastJjError: unknown;
     for (const jjRef of buildJjDiffRefCandidates(ref)) {
-      const jjCommands = buildDiffAgainstCommands("jj", jjRef);
       try {
-        return {
-          commands: jjCommands,
-          resolvedDiff: await resolveDiffAgainstCommands(jjCommands, context),
-        };
+        return await resolveDiffAgainstBackend("jj", jjRef, context);
       } catch (error) {
         lastJjError = error;
       }
