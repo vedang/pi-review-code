@@ -6,6 +6,7 @@ import {
   buildJjDiffCommand,
   buildJjDiffForFileCommand,
   buildJjDiffNameOnlyCommand,
+  buildJjDiffRefCandidates,
   buildJjDiffStatCommand,
   normalizeGitFileList,
   validateDiffRef,
@@ -183,11 +184,20 @@ async function resolveDiffAgainstWithFallback(
       resolvedDiff: await resolveDiffAgainstCommands(gitCommands, context),
     };
   } catch {
-    const jjCommands = buildDiffAgainstCommands("jj", ref);
-    return {
-      commands: jjCommands,
-      resolvedDiff: await resolveDiffAgainstCommands(jjCommands, context),
-    };
+    let lastJjError: unknown;
+    for (const jjRef of buildJjDiffRefCandidates(ref)) {
+      const jjCommands = buildDiffAgainstCommands("jj", jjRef);
+      try {
+        return {
+          commands: jjCommands,
+          resolvedDiff: await resolveDiffAgainstCommands(jjCommands, context),
+        };
+      } catch (error) {
+        lastJjError = error;
+      }
+    }
+
+    throw lastJjError;
   }
 }
 

@@ -193,6 +193,129 @@ for (const scenario of [
   });
 }
 
+test("resolveReviewTarget falls back to jj remote bookmark for origin/main", async () => {
+  const calls: string[] = [];
+  const ref = "origin/main";
+  const jjRef = "main@origin";
+  const gitListCommand = gitDiffKey(ref, "--name-only");
+  const gitStatCommand = gitDiffKey(ref, "--stat");
+  const originalJjListCommand = jjDiffKey(ref, "--name-only");
+  const originalJjStatCommand = jjDiffKey(ref, "--stat");
+  const translatedJjListCommand = jjDiffKey(jjRef, "--name-only");
+  const translatedJjStatCommand = jjDiffKey(jjRef, "--stat");
+  const translatedJjDiffCommand = jjDiffKey(jjRef, "--git");
+
+  const target = await resolveReviewTarget(
+    { kind: "diff-against", ref, targetHint: ref },
+    {
+      exec: async (command, args) => {
+        const call = commandKey(command, args);
+        calls.push(call);
+        if (command === "git") {
+          return {
+            stdout: "",
+            stderr:
+              "fatal: ambiguous argument 'origin/main...HEAD': unknown revision or path not in the working tree.",
+            exitCode: 128,
+          };
+        }
+        if (call === originalJjListCommand || call === originalJjStatCommand) {
+          return {
+            stdout: "",
+            stderr: "Error: Revision `origin/main` doesn't exist",
+            exitCode: 1,
+          };
+        }
+        if (call === translatedJjListCommand) {
+          return { stdout: "src/changed.ts\n", stderr: "", exitCode: 0 };
+        }
+        if (call === translatedJjStatCommand) {
+          return { stdout: "1 file changed", stderr: "", exitCode: 0 };
+        }
+        if (call === translatedJjDiffCommand) {
+          return {
+            stdout: "diff --git a/src/changed.ts b/src/changed.ts\n+new code\n",
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      },
+    },
+  );
+
+  assert.equal(target.kind, "diff-against");
+  assert.equal(target.ref, ref);
+  assert.deepEqual(target.files, ["src/changed.ts"]);
+  assert.equal(target.diffStat, "1 file changed");
+  assert.equal(
+    target.diffText,
+    "diff --git a/src/changed.ts b/src/changed.ts\n+new code\n",
+  );
+  assert.deepEqual(calls.slice(0, 2), [gitListCommand, gitStatCommand]);
+  assert.deepEqual(calls.slice(2), [
+    originalJjListCommand,
+    originalJjStatCommand,
+    translatedJjListCommand,
+    translatedJjStatCommand,
+    translatedJjDiffCommand,
+  ]);
+  assert.deepEqual(target.commandHints, jjDiffCommandHints(jjRef));
+});
+
+test("resolveReviewTarget keeps slash-named jj refs before translating", async () => {
+  const calls: string[] = [];
+  const ref = "feature/review-123";
+  const gitListCommand = gitDiffKey(ref, "--name-only");
+  const gitStatCommand = gitDiffKey(ref, "--stat");
+  const jjListCommand = jjDiffKey(ref, "--name-only");
+  const jjStatCommand = jjDiffKey(ref, "--stat");
+  const jjDiffCommand = jjDiffKey(ref, "--git");
+
+  const target = await resolveReviewTarget(
+    { kind: "diff-against", ref, targetHint: ref },
+    {
+      exec: async (command, args) => {
+        const call = commandKey(command, args);
+        calls.push(call);
+        if (command === "git") {
+          return {
+            stdout: "",
+            stderr: "fatal: not a git repository",
+            exitCode: 128,
+          };
+        }
+        if (call === jjListCommand) {
+          return { stdout: "src/native-jj.ts\n", stderr: "", exitCode: 0 };
+        }
+        if (call === jjStatCommand) {
+          return { stdout: "1 file changed", stderr: "", exitCode: 0 };
+        }
+        if (call === jjDiffCommand) {
+          return {
+            stdout:
+              "diff --git a/src/native-jj.ts b/src/native-jj.ts\n+native jj\n",
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      },
+    },
+  );
+
+  assert.equal(target.kind, "diff-against");
+  assert.deepEqual(target.files, ["src/native-jj.ts"]);
+  assert.equal(target.diffStat, "1 file changed");
+  assert.deepEqual(calls.slice(0, 2), [gitListCommand, gitStatCommand]);
+  assert.deepEqual(calls.slice(2), [
+    jjListCommand,
+    jjStatCommand,
+    jjDiffCommand,
+  ]);
+  assert.deepEqual(target.commandHints, jjDiffCommandHints(ref));
+});
+
 test("resolveReviewTarget skips full diff when diff stat is large", async () => {
   const exec = recordingExec({
     [gitDiffKey("origin/main", "--name-only")]: "src/huge.ts\n",

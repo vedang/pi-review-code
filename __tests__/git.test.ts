@@ -9,6 +9,7 @@ import {
   buildJjDiffCommand,
   buildJjDiffForFileCommand,
   buildJjDiffNameOnlyCommand,
+  buildJjDiffRefCandidates,
   buildJjDiffStatCommand,
   normalizeGitFileList,
   validateDiffRef,
@@ -86,6 +87,35 @@ test("git and jj diff command builders use argument arrays", () => {
   for (const [actual, command, args] of cases) {
     assert.deepEqual(actual, { command, args: [...args] });
   }
+});
+
+test("jj diff command builders preserve refs until fallback chooses a candidate", () => {
+  assert.deepEqual(buildJjDiffNameOnlyCommand("feature/review-123"), {
+    command: "jj",
+    args: jjDiffArgs("feature/review-123", "--name-only"),
+  });
+});
+
+test("jj diff ref candidates include common git ref spellings", () => {
+  assert.deepEqual(buildJjDiffRefCandidates("origin/main"), [
+    "origin/main",
+    "main@origin",
+  ]);
+  assert.deepEqual(buildJjDiffRefCandidates("refs/heads/main"), [
+    "refs/heads/main",
+    "main",
+  ]);
+  assert.deepEqual(
+    buildJjDiffRefCandidates("refs/remotes/upstream/release/v1"),
+    ["refs/remotes/upstream/release/v1", "release/v1@upstream"],
+  );
+  assert.deepEqual(buildJjDiffRefCandidates("refs/tags/v1.0.0"), [
+    "refs/tags/v1.0.0",
+    "v1.0.0",
+  ]);
+  assert.deepEqual(buildJjDiffRefCandidates("@-"), ["@-"]);
+  assert.deepEqual(buildJjDiffRefCandidates("trunk()"), ["trunk()"]);
+  assert.deepEqual(buildJjDiffRefCandidates("main@origin"), ["main@origin"]);
 });
 
 test("normalizeGitFileList trims empty diff output lines", () => {

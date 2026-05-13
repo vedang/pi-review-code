@@ -12,6 +12,10 @@ const REF_SEGMENT_PATTERN = /^[A-Za-z0-9@][A-Za-z0-9._@+-]*$/;
 const JJ_SYMBOLIC_REVSET_PATTERN = /^@[-+]*$/;
 const JJ_EMPTY_FUNCTION_REVSET_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*\(\)$/;
 
+const GIT_REMOTE_REF_PREFIX = "refs/remotes/";
+const GIT_HEADS_REF_PREFIX = "refs/heads/";
+const GIT_TAGS_REF_PREFIX = "refs/tags/";
+
 function invalidDiffRef(reason: string): RefValidationResult {
   return {
     ok: false,
@@ -74,6 +78,55 @@ function gitDiff(
     command: "git",
     args: ["--no-pager", "diff", `${ref}...HEAD`, ...args],
   };
+}
+
+function translateGitRefForJj(ref: string): string | null {
+  if (
+    ref.includes("@") ||
+    JJ_SYMBOLIC_REVSET_PATTERN.test(ref) ||
+    JJ_EMPTY_FUNCTION_REVSET_PATTERN.test(ref)
+  ) {
+    return null;
+  }
+
+  if (ref.startsWith(GIT_REMOTE_REF_PREFIX)) {
+    const remainder = ref.slice(GIT_REMOTE_REF_PREFIX.length);
+    const slash = remainder.indexOf("/");
+    if (slash <= 0 || slash >= remainder.length - 1) {
+      return null;
+    }
+    const remote = remainder.slice(0, slash);
+    const branch = remainder.slice(slash + 1);
+    return `${branch}@${remote}`;
+  }
+
+  if (ref.startsWith(GIT_HEADS_REF_PREFIX)) {
+    const branch = ref.slice(GIT_HEADS_REF_PREFIX.length);
+    return branch.length > 0 ? branch : null;
+  }
+
+  if (ref.startsWith(GIT_TAGS_REF_PREFIX)) {
+    const tag = ref.slice(GIT_TAGS_REF_PREFIX.length);
+    return tag.length > 0 ? tag : null;
+  }
+
+  const slash = ref.indexOf("/");
+  if (slash === -1 || slash === ref.length - 1) {
+    return null;
+  }
+
+  const remote = ref.slice(0, slash);
+  const branch = ref.slice(slash + 1);
+  return `${branch}@${remote}`;
+}
+
+export function buildJjDiffRefCandidates(ref: string): string[] {
+  const translatedRef = translateGitRefForJj(ref);
+  if (translatedRef === null || translatedRef === ref) {
+    return [ref];
+  }
+
+  return [ref, translatedRef];
 }
 
 function jjDiff(
