@@ -230,7 +230,10 @@ test("extension abandons persisted active review state on session_start", async 
   const handler = harness.events.get("session_start");
 
   assert.ok(handler, "expected session_start handler to be registered");
-  assert.equal(harness.registeredTools.length, 1);
+  assert.deepEqual(
+    harness.registeredTools.map((tool) => (tool as { name?: string }).name),
+    ["add_review_comment", "set_review_prompt"],
+  );
 
   await handler({ type: "session_start", reason: "reload" }, harness.ctx);
 

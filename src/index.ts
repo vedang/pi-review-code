@@ -14,6 +14,7 @@ import {
 } from "./draft.js";
 import { createReviewFlowController } from "./flow.js";
 import { readReviewGuidelinesFromCwd } from "./guidelines.js";
+import { registerSetReviewPromptTool } from "./meta-result.js";
 import { buildReviewPromptDraftRequest } from "./prompts.js";
 import { registerReviewMessageRenderers } from "./renderers.js";
 import { showReviewFixWidget } from "./review-fix-widget.js";
@@ -78,6 +79,11 @@ function registerReviewRuntimeHelpers(
   registerAddReviewCommentTool(pi, {
     getState: () => stateManager.getState(),
     createId: () => crypto.randomUUID(),
+    now: () => Date.now(),
+  });
+
+  registerSetReviewPromptTool(pi, {
+    getState: () => stateManager.getState(),
     now: () => Date.now(),
   });
 
