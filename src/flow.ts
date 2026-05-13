@@ -33,6 +33,7 @@ import {
   type ResolvedReviewTarget,
   type ReviewComment,
   type ReviewFixRunInfo,
+  type ReviewMetaResult,
   type ReviewTarget,
 } from "./types.js";
 
@@ -41,6 +42,41 @@ export const REVIEW_PROMPT_ENTRY_TYPE = "pi-review-code:prompt";
 export const REVIEW_SUMMARY_ENTRY_TYPE = "pi-review-code:review-summary";
 export const REVIEW_FIX_SUMMARY_ENTRY_TYPE =
   "pi-review-code:review-fix-summary";
+export const REVIEW_META_PROMPT_ENTRY_TYPE = "pi-review-code:meta-prompt";
+export const REVIEW_META_SUMMARY_ENTRY_TYPE = "pi-review-code:meta-summary";
+
+export type ReviewMetaPromptMessageDetails = {
+  kind: "meta-prompt";
+  runId: string;
+  targetHint: string;
+  metaPrompt: string;
+  originModelProvider: string;
+  originModelId: string;
+  originThinkingLevel: string;
+};
+
+export type BuildReviewMetaBranchSummaryInput = {
+  runId: string;
+  targetHint: string;
+  metaPrompt: string;
+  result: ReviewMetaResult;
+  completedAt: number;
+};
+
+export type ReviewMetaBranchSummaryDetails = {
+  kind: "meta";
+  runId: string;
+  targetHint: string;
+  metaPrompt: string;
+  reviewPrompt: string;
+  completedAt: number;
+  summary?: string;
+};
+
+export type ReviewMetaBranchSummary = {
+  summary: string;
+  details: ReviewMetaBranchSummaryDetails;
+};
 
 export type BuildReviewBranchSummaryInput = {
   runId: string;
@@ -139,7 +175,10 @@ export type ReviewFixWidgetData =
 export type ReviewSessionBeforeTreeResult = {
   summary: {
     summary: string;
-    details: ReviewBranchSummaryDetails | FixBranchSummaryDetails;
+    details:
+      | ReviewMetaBranchSummaryDetails
+      | ReviewBranchSummaryDetails
+      | FixBranchSummaryDetails;
   };
 };
 type ReviewInputWidgetKind = "review" | "diff-against" | "pr";

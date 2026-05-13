@@ -155,7 +155,7 @@ export type AddReviewCommentSourceState =
       runId: string;
       targetHint: string;
     }
-  | { activeKind: "fix" | null };
+  | { activeKind: "meta" | "fix" | null };
 
 export type AddReviewCommentSource = {
   getState: () => AddReviewCommentSourceState;

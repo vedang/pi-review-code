@@ -32,12 +32,23 @@ export type ReviewCommand = {
 export const REVIEW_STATE_VERSION = 1 as const;
 export const REVIEW_STATE_ENTRY_TYPE = "pi-review-code:state";
 export const REVIEW_COMMENT_ENTRY_TYPE = "pi-review-code:comment";
+export const REVIEW_META_RESULT_ENTRY_TYPE = "pi-review-code:meta-result";
 
-export type ReviewStateKind = "review" | "fix" | null;
+export type ReviewStateKind = "meta" | "review" | "fix" | null;
 
 export interface ReviewStateBase {
   version: typeof REVIEW_STATE_VERSION;
   activeKind: ReviewStateKind;
+}
+
+export interface ReviewMetaRunInfo {
+  runId: string;
+  originLeafId: string;
+  targetHint: string;
+  metaPrompt: string;
+  originModelProvider: string;
+  originModelId: string;
+  originThinkingLevel: string;
 }
 
 export interface ReviewActiveRunInfo {
@@ -56,6 +67,10 @@ export interface ReviewFixRunInfo extends ReviewActiveRunInfo {
   fixContext?: string;
 }
 
+export interface ReviewMetaState extends ReviewStateBase, ReviewMetaRunInfo {
+  activeKind: "meta";
+}
+
 export interface ReviewActiveState
   extends ReviewStateBase,
     ReviewActiveRunInfo {
@@ -72,11 +87,22 @@ export interface ReviewFixState extends ReviewStateBase, ReviewFixRunInfo {
 
 export type ReviewState =
   | ReviewInactiveState
+  | ReviewMetaState
   | ReviewActiveState
   | ReviewFixState;
 
+export type ReviewMetaStateStart = ReviewMetaRunInfo;
 export type ReviewStateStart = ReviewActiveRunInfo;
 export type ReviewFixStateStart = ReviewFixRunInfo;
+
+export interface ReviewMetaResult {
+  version: typeof REVIEW_STATE_VERSION;
+  runId: string;
+  targetHint: string;
+  reviewPrompt: string;
+  summary?: string;
+  createdAt: number;
+}
 
 export type ReviewCommentPriority = "P0" | "P1" | "P2" | "P3";
 
