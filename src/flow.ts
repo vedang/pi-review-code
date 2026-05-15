@@ -15,14 +15,8 @@ import {
   parseReviewArgs,
   parseUnifiedReviewArgs,
 } from "./command.js";
-import type {
-  PiReviewThinkingLevel,
-  ReviewPromptDraftGenerationResult,
-} from "./draft.js";
-import type {
-  ReviewPromptDraftOptions,
-  ReviewPromptDraftRequest,
-} from "./prompts.js";
+import type { PiReviewThinkingLevel } from "./draft.js";
+import type { ReviewPromptDraftOptions } from "./prompts.js";
 import {
   buildReviewFixPrompt,
   buildReviewMetaPassPrompt,
@@ -781,16 +775,6 @@ type ReviewFlowController = {
 
 type ResolveTarget = (target: ReviewTarget) => Promise<ResolvedReviewTarget>;
 
-type GenerateDraft = (
-  request: ReviewPromptDraftRequest,
-  context: {
-    model: NonNullable<ExtensionCommandContext["model"]>;
-    modelRegistry: ExtensionCommandContext["modelRegistry"];
-    thinkingLevel: PiReviewThinkingLevel;
-    signal?: AbortSignal;
-  },
-) => Promise<ReviewPromptDraftGenerationResult>;
-
 type GetCommentsForRun = (
   context: { sessionManager: ExtensionContext["sessionManager"] },
   runId: string,
@@ -811,12 +795,7 @@ type ReviewFlowDependencies = {
   pi: ReviewFlowRuntime;
   stateManager: ReviewFlowStateManager;
   resolveTarget: ResolveTarget;
-  buildDraftRequest: (
-    target: ResolvedReviewTarget,
-    options?: ReviewPromptDraftOptions,
-  ) => ReviewPromptDraftRequest;
   readReviewGuidelines?: () => Promise<string | undefined>;
-  generateDraft: GenerateDraft;
   getCommentsForRun: GetCommentsForRun;
   getMetaResultForRun: (
     context: { sessionManager: ExtensionContext["sessionManager"] },
@@ -833,7 +812,7 @@ type ReviewLaunchContext = {
   model: NonNullable<ExtensionCommandContext["model"]>;
   originLeafId: string;
   resolvedTarget: ResolvedReviewTarget;
-  draftOptions: ReviewPromptDraftOptions;
+  promptOptions: ReviewPromptDraftOptions;
   thinkingLevel: PiReviewThinkingLevel;
 };
 
@@ -1088,30 +1067,24 @@ export function createReviewFlowController(
     return true;
   }
 
-  function buildDraftOptions(
+  function buildPromptOptions(
     resolvedTarget: ResolvedReviewTarget,
     reviewGuidelines?: string,
   ): ReviewPromptDraftOptions {
-    const draftOptions: ReviewPromptDraftOptions = {};
+    const promptOptions: ReviewPromptDraftOptions = {};
     if (
       resolvedTarget.kind === "diff-against" &&
       resolvedTarget.diffText !== undefined
     ) {
-      draftOptions.diffText = resolvedTarget.diffText;
+      promptOptions.diffText = resolvedTarget.diffText;
     }
 
     const normalizedReviewGuidelines = normalizeOptionalText(reviewGuidelines);
     if (normalizedReviewGuidelines !== undefined) {
-      draftOptions.reviewGuidelines = normalizedReviewGuidelines;
+      promptOptions.reviewGuidelines = normalizedReviewGuidelines;
     }
 
-    return draftOptions;
-  }
-
-  function optionalDraftOptions(
-    draftOptions: ReviewPromptDraftOptions,
-  ): ReviewPromptDraftOptions | undefined {
-    return Object.keys(draftOptions).length === 0 ? undefined : draftOptions;
+    return promptOptions;
   }
 
   async function resolveReviewLaunchContext(
@@ -1164,34 +1137,9 @@ export function createReviewFlowController(
       model,
       originLeafId,
       resolvedTarget,
-      draftOptions: buildDraftOptions(resolvedTarget, reviewGuidelines),
+      promptOptions: buildPromptOptions(resolvedTarget, reviewGuidelines),
       thinkingLevel: dependencies.getThinkingLevel(),
     };
-  }
-
-  async function generateReviewPromptDraft(
-    launchContext: ReviewLaunchContext,
-    ctx: ExtensionCommandContext,
-  ): Promise<string | undefined> {
-    const draftRequest = dependencies.buildDraftRequest(
-      launchContext.resolvedTarget,
-      optionalDraftOptions(launchContext.draftOptions),
-    );
-    ctx.ui.notify("Generating review prompt draft…", "info");
-
-    const draft = await dependencies.generateDraft(draftRequest, {
-      model: launchContext.model,
-      modelRegistry: ctx.modelRegistry,
-      thinkingLevel: launchContext.thinkingLevel,
-      signal: ctx.signal,
-    });
-
-    if (!draft.ok) {
-      ctx.ui.notify(draft.error, "error");
-      return undefined;
-    }
-
-    return draft.draft;
   }
 
   function startReviewFromPrompt(
@@ -1232,7 +1180,7 @@ export function createReviewFlowController(
   ): void {
     const runId = dependencies.createRunId();
     const metaPrompt = buildReviewMetaPassPrompt(launchContext.resolvedTarget, {
-      ...launchContext.draftOptions,
+      ...launchContext.promptOptions,
       runId,
     });
     const runInfo: ReviewMetaRunInfo = {

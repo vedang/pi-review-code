@@ -93,7 +93,6 @@ type HarnessOptions = {
   hasUI?: boolean;
   model?: { provider: string; id: string } | null;
   editorResult?: string | undefined;
-  draftOk?: boolean;
   navigateResults?: Array<{ cancelled: boolean } | Error>;
   target?: ResolvedReviewTarget;
   reviewGuidelines?: string;
@@ -129,8 +128,6 @@ function createHarness(options: HarnessOptions = {}) {
   const editorInputs: Array<{ title: string; initialValue: string }> = [];
   const inputWidgetCalls: InputWidgetCall[] = [];
   const resolvedTargets: unknown[] = [];
-  const draftRequests: unknown[] = [];
-  const draftOptions: unknown[] = [];
   const reviewGuidelineReads: number[] = [];
   let sentUserMessageAttempts = 0;
   let metaResult = options.metaResult;
@@ -140,7 +137,6 @@ function createHarness(options: HarnessOptions = {}) {
   };
 
   const target = options.target ?? promptTarget();
-  const draftOk = options.draftOk ?? true;
   const navigateResults = [...(options.navigateResults ?? [])];
   const runIds = [...(options.runIds ?? ["meta-1", "review-1", "fix-1"])];
   const anchorLeafId = options.anchorLeafId ?? "leaf-anchor";
@@ -197,26 +193,12 @@ function createHarness(options: HarnessOptions = {}) {
       resolvedTargets.push(reviewTarget);
       return target;
     },
-    buildDraftRequest: (resolvedTarget, options) => {
-      draftRequests.push(resolvedTarget);
-      draftOptions.push(options);
-      return { systemPrompt: "system", userPrompt: "packet" };
-    },
     readReviewGuidelines: async () => {
       reviewGuidelineReads.push(1);
       if (options.reviewGuidelinesError !== undefined) {
         throw options.reviewGuidelinesError;
       }
       return options.reviewGuidelines;
-    },
-    generateDraft: async (request) => {
-      assert.deepEqual(request, {
-        systemPrompt: "system",
-        userPrompt: "packet",
-      });
-      return draftOk
-        ? { ok: true, draft: "Generated review prompt" }
-        : { ok: false, error: "LLM unavailable" };
     },
     getCommentsForRun: () => [comment()],
     getMetaResultForRun: () => metaResult,
@@ -289,8 +271,6 @@ function createHarness(options: HarnessOptions = {}) {
     editorInputs,
     inputWidgetCalls,
     resolvedTargets,
-    draftRequests,
-    draftOptions,
     reviewGuidelineReads,
     setMetaResult: (nextMetaResult: ReviewMetaResult | undefined) => {
       metaResult = nextMetaResult;
@@ -397,7 +377,6 @@ test("review flow starts meta-pass before human prompt editor", async () => {
     },
   ]);
   assertStartedMetaPass(harness);
-  assert.equal(harness.draftRequests.length, 0);
 });
 
 test("review flow rejects a second review while a run is active", async () => {
@@ -807,7 +786,6 @@ test("review flow cancels before target resolution when widget is dismissed", as
 
   assert.equal(harness.inputWidgetCalls.length, 1);
   assert.deepEqual(harness.resolvedTargets, []);
-  assert.deepEqual(harness.draftRequests, []);
   assert.deepEqual(harness.sentUserMessages, []);
   assert.deepEqual(harness.notifications, [
     { message: "Review cancelled.", level: "info" },
@@ -891,7 +869,6 @@ test("review flow launches PR meta-pass after resolving PR metadata", async () =
   assert.deepEqual(harness.resolvedTargets, [
     { kind: "pr", selector, targetHint: selector },
   ]);
-  assert.equal(harness.draftRequests.length, 0);
   assert.match(harness.sentUserMessages[0] ?? "", /Tighten auth checks\./);
   assert.match(harness.sentUserMessages[0] ?? "", /bob: existing concern/);
   assert.match(
@@ -928,7 +905,6 @@ test("review flow passes resolved diff text to meta prompt", async () => {
 
   await harness.controller.handleReviewCommand("origin/main", harness.ctx);
 
-  assert.equal(harness.draftRequests.length, 0);
   assert.match(
     harness.sentUserMessages[0] ?? "",
     /diff --git a\/src\/auth\.ts b\/src\/auth\.ts\n\+rotateToken\(\);/,
@@ -947,7 +923,6 @@ test("review flow passes REVIEW_GUIDELINES.md content to meta prompt", async () 
   );
 
   assert.deepEqual(harness.reviewGuidelineReads, [1]);
-  assert.equal(harness.draftOptions.length, 0);
   assert.match(
     harness.sentUserMessages[0] ?? "",
     /Require tests for changed behavior\./,
@@ -966,7 +941,6 @@ test("review flow aborts when repository guidelines cannot be read", async () =>
   );
 
   assert.deepEqual(harness.reviewGuidelineReads, [1]);
-  assert.deepEqual(harness.draftRequests, []);
   assert.deepEqual(harness.sentUserMessages, []);
   assert.deepEqual(harness.notifications, [
     { message: "REVIEW_GUIDELINES.md is too large", level: "error" },

@@ -7,18 +7,13 @@ import {
   getReviewCommentsForRun,
   registerAddReviewCommentTool,
 } from "./comments.js";
-import {
-  type PiReviewThinkingLevel,
-  completeReviewPromptDraftWithPiAi,
-  generateReviewPromptDraft,
-} from "./draft.js";
+import type { PiReviewThinkingLevel } from "./draft.js";
 import { createReviewFlowController } from "./flow.js";
 import { readReviewGuidelinesFromCwd } from "./guidelines.js";
 import {
   getReviewMetaResultForRun,
   registerSetReviewPromptTool,
 } from "./meta-result.js";
-import { buildReviewPromptDraftRequest } from "./prompts.js";
 import { registerReviewMessageRenderers } from "./renderers.js";
 import { showReviewFixWidget } from "./review-fix-widget.js";
 import { showReviewInputWidget } from "./review-input-widget.js";
@@ -190,19 +185,7 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
           };
         },
       }),
-    buildDraftRequest: buildReviewPromptDraftRequest,
     readReviewGuidelines: () => readReviewGuidelinesFromCwd(),
-    generateDraft: (request, context) =>
-      generateReviewPromptDraft(request, {
-        completeDraft: (draftRequest) =>
-          completeReviewPromptDraftWithPiAi({
-            request: draftRequest,
-            model: context.model,
-            modelRegistry: context.modelRegistry,
-            thinkingLevel: context.thinkingLevel,
-            signal: context.signal,
-          }),
-      }),
     getCommentsForRun: (context, runId) =>
       getReviewCommentsForRun(context, runId),
     getMetaResultForRun: (context, runId) =>

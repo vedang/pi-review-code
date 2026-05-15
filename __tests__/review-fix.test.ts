@@ -365,12 +365,6 @@ function createHarness(options: HarnessOptions = {}) {
     resolveTarget: async () => {
       throw new Error("unused");
     },
-    buildDraftRequest: () => {
-      throw new Error("unused");
-    },
-    generateDraft: async () => {
-      throw new Error("unused");
-    },
     getCommentsForRun: () => [],
     getMetaResultForRun: () => undefined,
     createRunId: () => "fix-1",
