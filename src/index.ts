@@ -25,6 +25,7 @@ import {
   getLatestReviewState,
 } from "./state.js";
 import { resolveReviewTarget } from "./targets.js";
+import type { ReviewState } from "./types.js";
 
 export const REVIEW_HELP_TEXT = [
   "pi-review-code review flow is installed.",
@@ -113,6 +114,8 @@ type ReviewCommandDefinition = {
   hasEmptyArgsHelp?: boolean;
 };
 
+type ActivePersistedReviewState = Exclude<ReviewState, { activeKind: null }>;
+
 type ReviewRuntimeCommandDefinition = ReviewCommandDefinition & {
   runtimeHandler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
 };
@@ -129,6 +132,23 @@ const REVIEW_COMMANDS = {
     helpText: REVIEW_HELP_TEXT,
   },
 } as const satisfies Record<string, ReviewCommandDefinition>;
+
+const PERSISTED_RUN_RELOAD_COPY = {
+  meta: { label: "review prompt meta-pass", retryCommand: "/review" },
+  review: { label: "review", retryCommand: "/review" },
+  fix: { label: "fix", retryCommand: "/review-fix" },
+} as const satisfies Record<
+  ActivePersistedReviewState["activeKind"],
+  { label: string; retryCommand: string }
+>;
+
+function buildPersistedRunReloadMessage(
+  state: ActivePersistedReviewState,
+): string {
+  const copy = PERSISTED_RUN_RELOAD_COPY[state.activeKind];
+
+  return `Abandoned persisted pi-review-code ${copy.label} ${state.runId} after extension reload; start ${copy.retryCommand} again.`;
+}
 
 export default function reviewCodeExtension(pi: ExtensionAPI): void {
   if (isReviewRendererRuntime(pi)) {
@@ -192,35 +212,10 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     const latestState = getLatestReviewState(ctx);
 
-    if (latestState.activeKind === "meta") {
+    if (latestState.activeKind !== null) {
       stateManager.clearActiveRun(ctx);
       if (ctx.hasUI) {
-        ctx.ui.notify(
-          `Abandoned persisted pi-review-code review prompt meta-pass ${latestState.runId} after extension reload; start /review again.`,
-          "warning",
-        );
-      }
-      return;
-    }
-
-    if (latestState.activeKind === "review") {
-      stateManager.clearActiveRun(ctx);
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          `Abandoned persisted pi-review-code review ${latestState.runId} after extension reload; start /review again.`,
-          "warning",
-        );
-      }
-      return;
-    }
-
-    if (latestState.activeKind === "fix") {
-      stateManager.clearActiveRun(ctx);
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          `Abandoned persisted pi-review-code fix ${latestState.runId} after extension reload; start /review-fix again.`,
-          "warning",
-        );
+        ctx.ui.notify(buildPersistedRunReloadMessage(latestState), "warning");
       }
       return;
     }

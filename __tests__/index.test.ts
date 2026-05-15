@@ -52,6 +52,22 @@ function persistedMetaState(): Record<string, unknown> {
   };
 }
 
+function persistedFixState(): Record<string, unknown> {
+  return {
+    version: 1,
+    activeKind: "fix",
+    originLeafId: "leaf-origin",
+    runId: "fix-1",
+    targetHint: "origin/main",
+    reviewPrompt: "Fix comments",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+    sourceReviewRunId: "review-1",
+    commentIds: ["comment-1"],
+  };
+}
+
 function createHarness() {
   const commands = new Map<string, RegisteredCommand["handler"]>();
   const messageRenderers = new Map<string, unknown>();
@@ -256,54 +272,47 @@ test("runtime registers review lifecycle hooks", () => {
   assert.ok(harness.events.has("session_before_tree"));
 });
 
-test("extension abandons persisted active review state on session_start", async () => {
-  const harness = createRuntimeHarness();
-  const handler = harness.events.get("session_start");
+const persistedActiveStateCases = [
+  {
+    name: "review",
+    stateData: persistedReviewState(),
+    message:
+      "Abandoned persisted pi-review-code review review-1 after extension reload; start /review again.",
+  },
+  {
+    name: "meta",
+    stateData: persistedMetaState(),
+    message:
+      "Abandoned persisted pi-review-code review prompt meta-pass meta-1 after extension reload; start /review again.",
+  },
+  {
+    name: "fix",
+    stateData: persistedFixState(),
+    message:
+      "Abandoned persisted pi-review-code fix fix-1 after extension reload; start /review-fix again.",
+  },
+] as const;
 
-  assert.ok(handler, "expected session_start handler to be registered");
-  assert.deepEqual(
-    harness.registeredTools.map((tool) => (tool as { name?: string }).name),
-    ["add_review_comment", "set_review_prompt"],
-  );
+for (const { name, stateData, message } of persistedActiveStateCases) {
+  test(`extension abandons persisted active ${name} state on session_start`, async () => {
+    const harness = createRuntimeHarness({ stateData });
+    const handler = harness.events.get("session_start");
 
-  await handler({ type: "session_start", reason: "reload" }, harness.ctx);
+    assert.ok(handler, "expected session_start handler to be registered");
+    assert.deepEqual(
+      harness.registeredTools.map((tool) => (tool as { name?: string }).name),
+      ["add_review_comment", "set_review_prompt"],
+    );
 
-  assert.deepEqual(harness.setActiveToolsCalls, [["read", "bash"]]);
-  assert.deepEqual(harness.appended, [
-    {
-      customType: REVIEW_STATE_ENTRY_TYPE,
-      data: { version: 1, activeKind: null },
-    },
-  ]);
-  assert.deepEqual(harness.notifications, [
-    {
-      message:
-        "Abandoned persisted pi-review-code review review-1 after extension reload; start /review again.",
-      level: "warning",
-    },
-  ]);
-});
+    await handler({ type: "session_start", reason: "reload" }, harness.ctx);
 
-test("extension abandons persisted active meta state on session_start", async () => {
-  const harness = createRuntimeHarness({ stateData: persistedMetaState() });
-  const handler = harness.events.get("session_start");
-
-  assert.ok(handler, "expected session_start handler to be registered");
-
-  await handler({ type: "session_start", reason: "reload" }, harness.ctx);
-
-  assert.deepEqual(harness.setActiveToolsCalls, [["read", "bash"]]);
-  assert.deepEqual(harness.appended, [
-    {
-      customType: REVIEW_STATE_ENTRY_TYPE,
-      data: { version: 1, activeKind: null },
-    },
-  ]);
-  assert.deepEqual(harness.notifications, [
-    {
-      message:
-        "Abandoned persisted pi-review-code review prompt meta-pass meta-1 after extension reload; start /review again.",
-      level: "warning",
-    },
-  ]);
-});
+    assert.deepEqual(harness.setActiveToolsCalls, [["read", "bash"]]);
+    assert.deepEqual(harness.appended, [
+      {
+        customType: REVIEW_STATE_ENTRY_TYPE,
+        data: { version: 1, activeKind: null },
+      },
+    ]);
+    assert.deepEqual(harness.notifications, [{ message, level: "warning" }]);
+  });
+}
