@@ -4,9 +4,13 @@ import test from "node:test";
 import {
   type FixBranchSummaryDetails,
   REVIEW_FIX_SUMMARY_ENTRY_TYPE,
+  REVIEW_META_PROMPT_ENTRY_TYPE,
+  REVIEW_META_SUMMARY_ENTRY_TYPE,
   REVIEW_PROMPT_ENTRY_TYPE,
   REVIEW_SUMMARY_ENTRY_TYPE,
   type ReviewBranchSummaryDetails,
+  type ReviewMetaBranchSummaryDetails,
+  type ReviewMetaPromptMessageDetails,
   type ReviewPromptMessageDetails,
 } from "../src/flow.js";
 import { registerReviewMessageRenderers } from "../src/renderers.js";
@@ -54,7 +58,9 @@ test("registerReviewMessageRenderers registers prompt and summary renderers", ()
   const renderers = collectRenderers();
 
   assert.ok(renderers.has(REVIEW_PROMPT_ENTRY_TYPE));
+  assert.ok(renderers.has(REVIEW_META_PROMPT_ENTRY_TYPE));
   assert.ok(renderers.has(REVIEW_SUMMARY_ENTRY_TYPE));
+  assert.ok(renderers.has(REVIEW_META_SUMMARY_ENTRY_TYPE));
   assert.ok(renderers.has(REVIEW_FIX_SUMMARY_ENTRY_TYPE));
 });
 
@@ -109,6 +115,112 @@ test("prompt renderer previews prompt until expanded", () => {
   assert.match(expanded ?? "", /prompt line 10/);
   assert.match(expanded ?? "", /anthropic\/claude-sonnet/);
   assert.doesNotMatch(expanded ?? "", /expand/);
+});
+
+test("meta prompt renderer previews prompt until expanded", () => {
+  const renderer = collectRenderers().get(REVIEW_META_PROMPT_ENTRY_TYPE);
+  assert.ok(renderer);
+
+  const details: ReviewMetaPromptMessageDetails = {
+    kind: "meta-prompt",
+    runId: "meta-1",
+    targetHint: "review auth boundaries",
+    metaPrompt: Array.from(
+      { length: 10 },
+      (_, index) => `meta line ${index + 1}`,
+    ).join("\n"),
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  };
+
+  const collapsed = renderer(
+    {
+      customType: REVIEW_META_PROMPT_ENTRY_TYPE,
+      content: "Review prompt meta-pass meta-1",
+      details,
+    },
+    { expanded: false },
+    theme,
+  )
+    ?.render(120)
+    .join("\n");
+
+  assert.match(collapsed ?? "", /Review prompt meta-pass/);
+  assert.match(collapsed ?? "", /meta-1/);
+  assert.match(collapsed ?? "", /meta line 1/);
+  assert.doesNotMatch(collapsed ?? "", /meta line 10/);
+  assert.match(collapsed ?? "", /expand/);
+
+  const expanded = renderer(
+    {
+      customType: REVIEW_META_PROMPT_ENTRY_TYPE,
+      content: "Review prompt meta-pass meta-1",
+      details,
+    },
+    { expanded: true },
+    theme,
+  )
+    ?.render(120)
+    .join("\n");
+
+  assert.match(expanded ?? "", /meta line 10/);
+  assert.match(expanded ?? "", /anthropic\/claude-sonnet/);
+  assert.doesNotMatch(expanded ?? "", /expand/);
+});
+
+test("meta summary renderer previews generated prompt and summary", () => {
+  const renderer = collectRenderers().get(REVIEW_META_SUMMARY_ENTRY_TYPE);
+  assert.ok(renderer);
+
+  const details: ReviewMetaBranchSummaryDetails = {
+    kind: "meta",
+    runId: "meta-1",
+    targetHint: "review auth boundaries",
+    metaPrompt: "Meta prompt",
+    reviewPrompt: Array.from(
+      { length: 10 },
+      (_, index) => `generated line ${index + 1}`,
+    ).join("\n"),
+    completedAt: 456,
+    summary: "Found auth/session invariants.",
+  };
+
+  const collapsed = renderer(
+    {
+      customType: REVIEW_META_SUMMARY_ENTRY_TYPE,
+      content: "Review prompt ready meta-1.",
+      details,
+    },
+    { expanded: false },
+    theme,
+  )
+    ?.render(120)
+    .join("\n");
+
+  assert.match(collapsed ?? "", /Review prompt ready meta-1/);
+  assert.match(collapsed ?? "", /review auth boundaries/);
+  assert.match(collapsed ?? "", /Found auth\/session invariants/);
+  assert.match(collapsed ?? "", /generated line 1/);
+  assert.doesNotMatch(collapsed ?? "", /generated line 10/);
+  assert.match(collapsed ?? "", /expand/);
+
+  const expanded = renderer(
+    {
+      customType: REVIEW_META_SUMMARY_ENTRY_TYPE,
+      content: "Review prompt ready meta-1.",
+      details,
+    },
+    { expanded: true },
+    theme,
+  )
+    ?.render(120)
+    .join("\n");
+
+  assert.match(expanded ?? "", /generated line 10/);
+  assert.match(expanded ?? "", /Meta-pass summary:/);
+  assert.match(expanded ?? "", /Meta prompt:/);
+  assert.match(expanded ?? "", /Meta prompt/);
 });
 
 test("review summary renderer shows findings compactly", () => {

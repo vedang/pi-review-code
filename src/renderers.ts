@@ -4,9 +4,13 @@ import { Box, Text } from "@mariozechner/pi-tui";
 import {
   type FixBranchSummaryDetails,
   REVIEW_FIX_SUMMARY_ENTRY_TYPE,
+  REVIEW_META_PROMPT_ENTRY_TYPE,
+  REVIEW_META_SUMMARY_ENTRY_TYPE,
   REVIEW_PROMPT_ENTRY_TYPE,
   REVIEW_SUMMARY_ENTRY_TYPE,
   type ReviewBranchSummaryDetails,
+  type ReviewMetaBranchSummaryDetails,
+  type ReviewMetaPromptMessageDetails,
   type ReviewPromptMessageDetails,
 } from "./flow.js";
 import type { AddReviewCommentReference, ReviewComment } from "./types.js";
@@ -103,6 +107,31 @@ function previewText(text: string, lineCount: number, theme: Theme): string {
   ].join("\n");
 }
 
+function buildPromptDisplayLines(input: {
+  title: string;
+  runId: string;
+  targetHint: string;
+  prompt: string;
+  expanded: boolean;
+  expandedMetadata?: string[];
+  theme: Theme;
+}): string[] {
+  const prompt = input.expanded
+    ? input.prompt
+    : previewText(input.prompt, PROMPT_PREVIEW_LINES, input.theme);
+  const lines = [
+    `${input.theme.fg("accent", input.theme.bold(input.title))} ${input.theme.fg("muted", input.runId)}`,
+    `Target: ${input.targetHint}`,
+  ];
+
+  if (input.expanded && input.expandedMetadata !== undefined) {
+    lines.push(...input.expandedMetadata);
+  }
+
+  lines.push("", prompt);
+  return lines;
+}
+
 function isPromptDetails(value: unknown): value is ReviewPromptMessageDetails {
   if (!isRecord(value)) {
     return false;
@@ -120,6 +149,24 @@ function isPromptDetails(value: unknown): value is ReviewPromptMessageDetails {
   );
 }
 
+function isMetaPromptDetails(
+  value: unknown,
+): value is ReviewMetaPromptMessageDetails {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    value.kind === "meta-prompt" &&
+    typeof value.runId === "string" &&
+    typeof value.targetHint === "string" &&
+    typeof value.metaPrompt === "string" &&
+    typeof value.originModelProvider === "string" &&
+    typeof value.originModelId === "string" &&
+    typeof value.originThinkingLevel === "string"
+  );
+}
+
 function isReviewSummaryDetails(
   value: unknown,
 ): value is ReviewBranchSummaryDetails {
@@ -131,6 +178,21 @@ function isReviewSummaryDetails(
     typeof value.reviewPrompt === "string" &&
     typeof value.completedAt === "number" &&
     Array.isArray(value.comments)
+  );
+}
+
+function isMetaSummaryDetails(
+  value: unknown,
+): value is ReviewMetaBranchSummaryDetails {
+  return (
+    isRecord(value) &&
+    value.kind === "meta" &&
+    typeof value.runId === "string" &&
+    typeof value.targetHint === "string" &&
+    typeof value.metaPrompt === "string" &&
+    typeof value.reviewPrompt === "string" &&
+    typeof value.completedAt === "number" &&
+    (value.summary === undefined || typeof value.summary === "string")
   );
 }
 
@@ -192,26 +254,83 @@ export function renderReviewPromptMessage(
 
   const title =
     details.mode === "review" ? "Review prompt" : "Review-fix prompt";
+  const expandedMetadata = [
+    `Model: ${details.originModelProvider}/${details.originModelId}`,
+    `Thinking: ${details.originThinkingLevel}`,
+  ];
+
+  if (details.mode === "fix" && details.sourceReviewRunId !== undefined) {
+    expandedMetadata.push(`Source review: ${details.sourceReviewRunId}`);
+  }
+
+  return renderMessageBox(
+    buildPromptDisplayLines({
+      title,
+      runId: details.runId,
+      targetHint: details.targetHint,
+      prompt: details.reviewPrompt,
+      expanded,
+      expandedMetadata,
+      theme,
+    }).join("\n"),
+    theme,
+  );
+}
+
+export function renderReviewMetaPromptMessage(
+  message: Parameters<ReviewMessageRenderer>[0],
+  { expanded }: Parameters<ReviewMessageRenderer>[1],
+  theme: Theme,
+): ReturnType<ReviewMessageRenderer> {
+  const details = message.details;
+  if (!isMetaPromptDetails(details)) {
+    return renderMessageBox(readTextContent(message.content), theme);
+  }
+
+  return renderMessageBox(
+    buildPromptDisplayLines({
+      title: "Review prompt meta-pass",
+      runId: details.runId,
+      targetHint: details.targetHint,
+      prompt: details.metaPrompt,
+      expanded,
+      expandedMetadata: [
+        `Model: ${details.originModelProvider}/${details.originModelId}`,
+        `Thinking: ${details.originThinkingLevel}`,
+      ],
+      theme,
+    }).join("\n"),
+    theme,
+  );
+}
+
+export function renderReviewMetaSummaryMessage(
+  message: Parameters<ReviewMessageRenderer>[0],
+  { expanded }: Parameters<ReviewMessageRenderer>[1],
+  theme: Theme,
+): ReturnType<ReviewMessageRenderer> {
+  const details = message.details;
+  if (!isMetaSummaryDetails(details)) {
+    return renderMessageBox(readTextContent(message.content), theme);
+  }
+
   const prompt = expanded
     ? details.reviewPrompt
     : previewText(details.reviewPrompt, PROMPT_PREVIEW_LINES, theme);
   const lines = [
-    `${theme.fg("accent", theme.bold(title))} ${theme.fg("muted", details.runId)}`,
+    `${theme.fg("success", theme.bold("Review prompt ready"))} ${theme.fg("muted", details.runId)}`,
     `Target: ${details.targetHint}`,
   ];
 
-  if (expanded) {
-    lines.push(
-      `Model: ${details.originModelProvider}/${details.originModelId}`,
-      `Thinking: ${details.originThinkingLevel}`,
-    );
-
-    if (details.mode === "fix" && details.sourceReviewRunId !== undefined) {
-      lines.push(`Source review: ${details.sourceReviewRunId}`);
-    }
+  if (details.summary !== undefined) {
+    lines.push("", theme.fg("dim", "Meta-pass summary:"), details.summary);
   }
 
-  lines.push("", prompt);
+  if (expanded) {
+    lines.push("", theme.fg("dim", "Meta prompt:"), details.metaPrompt);
+  }
+
+  lines.push("", theme.fg("dim", "Generated review prompt:"), prompt);
   return renderMessageBox(lines.join("\n"), theme);
 }
 
@@ -272,8 +391,16 @@ export function registerReviewMessageRenderers(
     renderReviewPromptMessage,
   );
   pi.registerMessageRenderer(
+    REVIEW_META_PROMPT_ENTRY_TYPE,
+    renderReviewMetaPromptMessage,
+  );
+  pi.registerMessageRenderer(
     REVIEW_SUMMARY_ENTRY_TYPE,
     renderReviewSummaryMessage,
+  );
+  pi.registerMessageRenderer(
+    REVIEW_META_SUMMARY_ENTRY_TYPE,
+    renderReviewMetaSummaryMessage,
   );
   pi.registerMessageRenderer(
     REVIEW_FIX_SUMMARY_ENTRY_TYPE,
