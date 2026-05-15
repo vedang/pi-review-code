@@ -6,7 +6,7 @@ Context-rich code review extension for Pi. The central thesis:
 
 > A good review of a large quantity of code is not possible without human-provided context.
 
-`pi-review-code` makes human context first-class: it resolves a review target, asks the current model to draft a detailed review prompt, lets you edit that prompt, then launches an isolated same-session review branch. When the branch finishes, Pi collapses back with review findings, thereby giving you back your context window.
+`pi-review-code` makes human context first-class: it resolves a review target, runs an investigative meta-pass branch to build a rich review prompt, lets you edit that prompt, then launches an isolated same-session review branch. When each branch finishes, Pi collapses back to your original context window with either the generated prompt or final review findings.
 
 ## Install
 
@@ -55,8 +55,8 @@ pi-review() { pi "/review $*"; }
 Start any review from one widget. Choose review type, then fill target plus optional context:
 
 - Free-form request: describe code, behavior, or risk to review.
-- Diff against ref: enter a git ref, jj change id/revset (for example `@-` or `trunk()`), or compatible base name. For git targets, the extension runs `git diff <base>...HEAD` first (`--name-only`, `--stat`, and file diff forms), then falls back to `jj diff` in jj workspaces when git is unavailable. Prompt drafts include changed files, diff stats, and safe command hints for the backend used.
-- PR/MR: enter a GitHub URL, GitLab URL, MR URL, or PR number. PR/MR reviews use `gh`/`glab` metadata and diff commands without checking out or switching VCS branches.
+- Diff against ref: enter a git ref, jj change id, supported simple jj revset (for example `@-` or `trunk()`), or compatible base name. The extension first tries git for file list/stat using `git diff <base>...HEAD`, embeds the full diff when small enough, and provides safe full/per-file command hints; when git resolution fails, it falls back to `jj diff` in jj workspaces. The prompt-generation meta-pass receives changed files, diff stats, any embedded diff snapshot, and safe command hints for the backend used.
+- PR/MR: enter a GitHub PR URL/number or a GitLab MR URL. PR/MR reviews use `gh`/`glab` metadata and diff commands without checking out or switching VCS branches.
 
 ```text
 /review
@@ -66,12 +66,12 @@ Start any review from one widget. Choose review type, then fill target plus opti
 /review 123
 ```
 
-Typed arguments prefill the target field. PR/MR URLs and number-only selectors also preselect PR/MR mode; ambiguous refs such as `origin/main` stay in free-form mode until you choose diff mode. Use explicit prefixes when you want the widget to open directly in a selector mode:
+Typed arguments prefill the target field. PR/MR URLs and GitHub PR number-only selectors also preselect PR/MR mode; ambiguous refs such as `origin/main` stay in free-form mode until you choose diff mode. Use explicit prefixes when you want the widget to open directly in a selector mode:
 
 ```text
 /review diff-against origin/main
 /review pr https://github.com/owner/repo/pull/123
-/review mr 123
+/review mr https://gitlab.com/group/project/-/merge_requests/123
 ```
 
 Useful manual review commands for git-backed targets:
@@ -85,9 +85,9 @@ Avoid `git diff <base>` and `git diff <base>..HEAD` for review; these can includ
 
 ### Repository review guidelines
 
-If `REVIEW_GUIDELINES.md` exists in the current working directory, `/review` reads it and includes the trimmed content in the review prompt draft context. Use it for repo-specific rules such as required test coverage, naming conventions, complexity limits, docstring expectations, or language-specific review checks.
+If `REVIEW_GUIDELINES.md` exists in the current working directory, `/review` reads it and includes the trimmed content in the prompt-generation meta-pass context. Use it for repo-specific rules such as required test coverage, naming conventions, complexity limits, docstring expectations, or language-specific review checks.
 
-Guidelines are sent to the selected model as part of the draft prompt. Keep them concise and do not include secrets. For safety, the extension rejects symlinks, non-regular files, and files larger than 64 KiB.
+Guidelines are sent to the selected model before the final review branch starts. Keep them concise and do not include secrets. For safety, the extension rejects symlinks, non-regular files, and files larger than 64 KiB.
 
 Example templates live in `guidelines_examples/python.md` and `guidelines_examples/typescript.md`; copy or adapt one into `REVIEW_GUIDELINES.md` for a project.
 
@@ -101,19 +101,23 @@ The active finding shows its full wrapped text in the widget; use Up/Down to foc
 
 1. Run `/review` in interactive Pi.
 2. Choose target type and fill the input widget: required target plus optional review context.
-3. Extension resolves target metadata.
-4. Current provider/model/thinking level generates a draft prompt.
-5. You edit or cancel the prompt.
-6. On submit, Pi starts a review branch with `add_review_comment` enabled.
-7. Review agent records actionable findings with `add_review_comment`.
-8. On agent completion, branch collapses back with a custom summary.
-9. `/review-fix` opens a checkbox widget using persisted review findings and starts a fix branch for selected findings.
+3. Extension resolves target metadata, diff context, and optional `REVIEW_GUIDELINES.md`.
+4. Pi starts a review prompt meta-pass branch with the current provider/model/thinking level.
+5. The meta-pass investigates repo/PR context and must finish by calling `set_review_prompt`.
+6. Pi collapses the meta-pass branch back and opens the generated prompt in the editor.
+7. You edit or cancel the prompt.
+8. On submit, Pi starts the final review branch with `add_review_comment` enabled.
+9. Review agent records actionable findings with `add_review_comment`.
+10. On agent completion, branch collapses back with a custom summary.
+11. `/review-fix` opens a checkbox widget using persisted review findings and starts a fix branch for selected findings.
 
 ## UI
 
 The extension registers compact custom renderers for:
 
-- review/fix prompts
+- review prompt meta-pass prompts
+- generated prompt summaries
+- final review/fix prompts
 - review summaries
 - review-fix summaries
 
@@ -129,6 +133,6 @@ Collapsed views show target, run id, and first findings. Prompt messages expand 
 ## Limitations
 
 - Interactive UI is required for prompt editing.
-- Prompt drafting fails closed if no current model/auth is available.
+- Prompt meta-pass fails closed if no current model/auth is available or if the meta-pass does not call `set_review_prompt`.
 - PR support depends on installed/authenticated `gh` or `glab`.
 - Active branch auto-collapse state does not resume after extension reload.

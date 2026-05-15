@@ -7,6 +7,7 @@ function formatUsage(...lines: string[]): string {
 export const REVIEW_USAGE = formatUsage(
   "  /review [target or request]",
   "  choose review type in the widget",
+  "  run prompt-generation meta-pass before final review",
   "  /review-fix",
 );
 

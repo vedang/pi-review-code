@@ -238,6 +238,12 @@ test("extension registers review commands and message renderers", () => {
   assert.ok(harness.messageRenderers.has("pi-review-code:review-fix-summary"));
 });
 
+test("review help explains meta-pass handoff", () => {
+  assert.match(REVIEW_HELP_TEXT, /prompt-generation meta-pass/);
+  assert.match(REVIEW_HELP_TEXT, /prompt editor/);
+  assert.match(REVIEW_HELP_TEXT, /final review/);
+});
+
 const scaffoldHelpCases = [
   ["review", REVIEW_HELP_TEXT],
   ["review-fix", REVIEW_FIX_HELP_TEXT],

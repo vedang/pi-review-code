@@ -159,10 +159,16 @@ test("parses unified /review widget prefill args", () => {
       initialPrimaryValue: "https://github.com/owner/repo/pull/123",
     },
   );
-  assert.deepEqual(parseUnifiedReviewArgs("mr 42"), {
-    initialKind: "pr",
-    initialPrimaryValue: "42",
-  });
+  assert.deepEqual(
+    parseUnifiedReviewArgs(
+      "mr https://gitlab.com/group/project/-/merge_requests/42",
+    ),
+    {
+      initialKind: "pr",
+      initialPrimaryValue:
+        "https://gitlab.com/group/project/-/merge_requests/42",
+    },
+  );
   assert.deepEqual(
     parseUnifiedReviewArgs("https://github.com/owner/repo/pull/123"),
     {
@@ -198,6 +204,7 @@ test("review-specific usage constants mention only supported commands", () => {
   assertUsageContains(REVIEW_USAGE, [
     /\/review \[target or request\]/,
     /choose review type/m,
+    /prompt-generation meta-pass before final review/m,
     /\/review-fix$/m,
   ]);
   assertUsageContains(REVIEW_FIX_USAGE, [/\/review-fix$/m]);

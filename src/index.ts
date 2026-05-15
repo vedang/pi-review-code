@@ -30,6 +30,7 @@ export const REVIEW_HELP_TEXT = [
   "Usage:",
   "- /review [target or request]",
   "  Choose review type in the widget: free-form, diff against ref, or PR/MR.",
+  "  Runs a prompt-generation meta-pass, opens the prompt editor, then starts the final review.",
   "- /review-fix",
 ].join("\n");
 
@@ -126,7 +127,7 @@ const REVIEW_COMMANDS = {
   },
   review: {
     name: "review",
-    description: "Start a context-rich code review",
+    description: "Generate a rich prompt, then start a code review",
     helpText: REVIEW_HELP_TEXT,
   },
 } as const satisfies Record<string, ReviewCommandDefinition>;
