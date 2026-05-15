@@ -20,6 +20,38 @@ type RegisteredEventHandler = (
   ctx: ExtensionCommandContext,
 ) => unknown;
 
+type RuntimeHarnessOptions = {
+  stateData?: unknown;
+};
+
+function persistedReviewState(): Record<string, unknown> {
+  return {
+    version: 1,
+    activeKind: "review",
+    originLeafId: "leaf-origin",
+    runId: "review-1",
+    targetHint: "origin/main",
+    reviewPrompt: "Review diff",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  };
+}
+
+function persistedMetaState(): Record<string, unknown> {
+  return {
+    version: 1,
+    activeKind: "meta",
+    originLeafId: "leaf-origin",
+    runId: "meta-1",
+    targetHint: "origin/main",
+    metaPrompt: "Create review prompt",
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  };
+}
+
 function createHarness() {
   const commands = new Map<string, RegisteredCommand["handler"]>();
   const messageRenderers = new Map<string, unknown>();
@@ -51,7 +83,7 @@ function createHarness() {
   return { commands, messageRenderers, notifications, ctx };
 }
 
-function createRuntimeHarness() {
+function createRuntimeHarness(options: RuntimeHarnessOptions = {}) {
   const commands = new Map<string, RegisteredCommand["handler"]>();
   const messageRenderers = new Map<string, unknown>();
   const events = new Map<string, RegisteredEventHandler>();
@@ -79,17 +111,7 @@ function createRuntimeHarness() {
         {
           type: "custom",
           customType: REVIEW_STATE_ENTRY_TYPE,
-          data: {
-            version: 1,
-            activeKind: "review",
-            originLeafId: "leaf-origin",
-            runId: "review-1",
-            targetHint: "origin/main",
-            reviewPrompt: "Review diff",
-            originModelProvider: "anthropic",
-            originModelId: "claude-sonnet",
-            originThinkingLevel: "high",
-          },
+          data: options.stateData ?? persistedReviewState(),
         },
       ],
     },
@@ -229,6 +251,7 @@ test("runtime registers review lifecycle hooks", () => {
   const harness = createRuntimeHarness();
 
   assert.ok(harness.events.has("before_agent_start"));
+  assert.ok(harness.events.has("tool_call"));
   assert.ok(harness.events.has("agent_end"));
   assert.ok(harness.events.has("session_before_tree"));
 });
@@ -256,6 +279,30 @@ test("extension abandons persisted active review state on session_start", async 
     {
       message:
         "Abandoned persisted pi-review-code review review-1 after extension reload; start /review again.",
+      level: "warning",
+    },
+  ]);
+});
+
+test("extension abandons persisted active meta state on session_start", async () => {
+  const harness = createRuntimeHarness({ stateData: persistedMetaState() });
+  const handler = harness.events.get("session_start");
+
+  assert.ok(handler, "expected session_start handler to be registered");
+
+  await handler({ type: "session_start", reason: "reload" }, harness.ctx);
+
+  assert.deepEqual(harness.setActiveToolsCalls, [["read", "bash"]]);
+  assert.deepEqual(harness.appended, [
+    {
+      customType: REVIEW_STATE_ENTRY_TYPE,
+      data: { version: 1, activeKind: null },
+    },
+  ]);
+  assert.deepEqual(harness.notifications, [
+    {
+      message:
+        "Abandoned persisted pi-review-code review prompt meta-pass meta-1 after extension reload; start /review again.",
       level: "warning",
     },
   ]);

@@ -192,6 +192,17 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     const latestState = getLatestReviewState(ctx);
 
+    if (latestState.activeKind === "meta") {
+      stateManager.clearActiveRun(ctx);
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `Abandoned persisted pi-review-code review prompt meta-pass ${latestState.runId} after extension reload; start /review again.`,
+          "warning",
+        );
+      }
+      return;
+    }
+
     if (latestState.activeKind === "review") {
       stateManager.clearActiveRun(ctx);
       if (ctx.hasUI) {
@@ -219,6 +230,7 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
   pi.on("before_agent_start", (event, ctx) =>
     controller.handleBeforeAgentStart(event, ctx),
   );
+  pi.on("tool_call", (event, ctx) => controller.handleToolCall(event, ctx));
   pi.on("agent_end", (event, ctx) => controller.handleAgentEnd(event, ctx));
   pi.on("session_before_tree", (event) =>
     controller.handleSessionBeforeTree(event),

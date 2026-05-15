@@ -425,6 +425,79 @@ test("before agent start abandons meta state for unrelated prompt", async () => 
   ]);
 });
 
+test("tool call guard blocks direct file mutation during meta-pass", async () => {
+  const harness = createHarness({ activeState: activeMetaState() });
+
+  const editResult = await harness.controller.handleToolCall(
+    {
+      type: "tool_call",
+      toolName: "edit",
+      toolCallId: "tool-1",
+      input: { path: "src/auth.ts" },
+    },
+    harness.ctx,
+  );
+  const writeResult = await harness.controller.handleToolCall(
+    {
+      type: "tool_call",
+      toolName: "write",
+      toolCallId: "tool-2",
+      input: { path: "src/auth.ts" },
+    },
+    harness.ctx,
+  );
+  const readResult = await harness.controller.handleToolCall(
+    {
+      type: "tool_call",
+      toolName: "read",
+      toolCallId: "tool-3",
+      input: { path: "src/auth.ts" },
+    },
+    harness.ctx,
+  );
+
+  assert.deepEqual(editResult, {
+    block: true,
+    reason:
+      "pi-review-code review prompt meta-pass meta-1 is read-only; edit is blocked. Use read/search/browser tools, then call set_review_prompt.",
+  });
+  assert.deepEqual(writeResult, {
+    block: true,
+    reason:
+      "pi-review-code review prompt meta-pass meta-1 is read-only; write is blocked. Use read/search/browser tools, then call set_review_prompt.",
+  });
+  assert.equal(readResult, undefined);
+  assert.deepEqual(harness.notifications, [
+    {
+      message: editResult.reason,
+      level: "warning",
+    },
+    {
+      message: writeResult.reason,
+      level: "warning",
+    },
+  ]);
+});
+
+test("tool call guard ignores mutation tools outside meta-pass", async () => {
+  for (const activeState of [undefined, activeFixState()] as const) {
+    const harness = createHarness({ activeState });
+
+    const result = await harness.controller.handleToolCall(
+      {
+        type: "tool_call",
+        toolName: "edit",
+        toolCallId: "tool-1",
+        input: { path: "src/auth.ts" },
+      },
+      harness.ctx,
+    );
+
+    assert.equal(result, undefined);
+    assert.deepEqual(harness.notifications, []);
+  }
+});
+
 test("review flow rejects overlapping launch while widget is pending", async () => {
   let releaseWidget: () => void = () => {};
   const inputWidgetDelay = new Promise<void>((resolve) => {

@@ -3,6 +3,8 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
   SessionBeforeTreeEvent,
+  ToolCallEvent,
+  ToolCallEventResult,
 } from "@mariozechner/pi-coding-agent";
 
 import {
@@ -734,6 +736,10 @@ type ReviewFlowController = {
     event: { prompt: string; systemPrompt: string; type?: string },
     ctx: ExtensionContext,
   ) => Promise<{ systemPrompt: string } | undefined>;
+  handleToolCall: (
+    event: ToolCallEvent,
+    ctx: ExtensionContext,
+  ) => ToolCallEventResult | undefined;
   handleAgentEnd: (event: unknown, ctx: ExtensionContext) => Promise<void>;
   handleSessionBeforeTree: (
     event: Pick<SessionBeforeTreeEvent, "preparation">,
@@ -1379,6 +1385,27 @@ export function createReviewFlowController(
     };
   }
 
+  function handleToolCall(
+    event: ToolCallEvent,
+    ctx: ExtensionContext,
+  ): ToolCallEventResult | undefined {
+    const state = dependencies.stateManager.getState();
+    if (state.activeKind !== "meta") {
+      return undefined;
+    }
+
+    if (event.toolName !== "edit" && event.toolName !== "write") {
+      return undefined;
+    }
+
+    const reason = `pi-review-code review prompt meta-pass ${state.runId} is read-only; ${event.toolName} is blocked. Use read/search/browser tools, then call set_review_prompt.`;
+    if (ctx.hasUI) {
+      ctx.ui.notify(reason, "warning");
+    }
+
+    return { block: true, reason };
+  }
+
   async function handleReviewFixCommand(
     args: string,
     ctx: ExtensionCommandContext,
@@ -1516,6 +1543,7 @@ export function createReviewFlowController(
     handleReviewCommand,
     handleReviewFixCommand,
     handleBeforeAgentStart,
+    handleToolCall,
     async handleAgentEnd(event, ctx): Promise<void> {
       if (activeRun === null) {
         return;
