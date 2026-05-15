@@ -1,17 +1,14 @@
 import type { ReviewCommand } from "./types.js";
 
-function formatUsage(...lines: string[]): string {
-  return ["Usage:", ...lines].join("\n");
-}
-
-export const REVIEW_USAGE = formatUsage(
+export const REVIEW_USAGE = [
+  "Usage:",
   "  /review [target or request]",
   "  choose review type in the widget",
   "  run prompt-generation meta-pass before final review",
   "  /review-fix",
-);
+].join("\n");
 
-export const REVIEW_FIX_USAGE = formatUsage("  /review-fix");
+export const REVIEW_FIX_USAGE = ["Usage:", "  /review-fix"].join("\n");
 
 const UNTERMINATED_QUOTE_ERROR = "Unterminated quote in command arguments.";
 
@@ -84,10 +81,6 @@ function tokenizeCommandArgs(input: string): string[] {
   return tokens;
 }
 
-function isBlank(value: string | undefined): boolean {
-  return value === undefined || value.trim().length === 0;
-}
-
 function requireNonBlank(
   value: string | undefined,
   errorMessage: string,
@@ -106,7 +99,7 @@ function withReviewContext(reviewContext?: string): { reviewContext?: string } {
     : { reviewContext: trimmed };
 }
 
-function parsePromptText(input: string): ReviewCommand {
+export function parseReviewArgs(input: string): ReviewCommand {
   const args = tokenizeCommandArgs(input);
 
   if (args.length === 0) {
@@ -114,7 +107,7 @@ function parsePromptText(input: string): ReviewCommand {
   }
 
   const promptText = args.join(" ").trim();
-  if (isBlank(promptText)) {
+  if (promptText.length === 0) {
     throw new Error(REVIEW_USAGE);
   }
 
@@ -214,10 +207,6 @@ export function buildReviewPrCommandFromInput(input: {
       ...withReviewContext(input.reviewContext),
     },
   };
-}
-
-export function parseReviewArgs(input: string): ReviewCommand {
-  return parsePromptText(input);
 }
 
 export function parseUnifiedReviewArgs(input: string): ParsedUnifiedReviewArgs {

@@ -110,7 +110,6 @@ type ReviewCommandDefinition = {
   name: "review-fix" | "review";
   description: string;
   helpText: string;
-  hasEmptyArgsHelp?: boolean;
 };
 
 type ActivePersistedReviewState = Exclude<ReviewState, { activeKind: null }>;
@@ -237,11 +236,6 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
       description: command.description,
       handler: async (args, ctx) => {
         if (!ctx.hasUI) {
-          return;
-        }
-
-        if (command.hasEmptyArgsHelp && args.trim().length === 0) {
-          ctx.ui.notify(command.helpText, "info");
           return;
         }
 
