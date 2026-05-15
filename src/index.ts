@@ -14,7 +14,10 @@ import {
 } from "./draft.js";
 import { createReviewFlowController } from "./flow.js";
 import { readReviewGuidelinesFromCwd } from "./guidelines.js";
-import { registerSetReviewPromptTool } from "./meta-result.js";
+import {
+  getReviewMetaResultForRun,
+  registerSetReviewPromptTool,
+} from "./meta-result.js";
 import { buildReviewPromptDraftRequest } from "./prompts.js";
 import { registerReviewMessageRenderers } from "./renderers.js";
 import { showReviewFixWidget } from "./review-fix-widget.js";
@@ -172,7 +175,7 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
   const controller = createReviewFlowController({
     pi: {
       appendEntry: (customType, data) => pi.appendEntry(customType, data),
-      sendMessage: (message) => pi.sendMessage(message),
+      sendMessage: (message, options) => pi.sendMessage(message, options),
       sendUserMessage: (message) => pi.sendUserMessage(message),
     },
     stateManager,
@@ -202,6 +205,8 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
       }),
     getCommentsForRun: (context, runId) =>
       getReviewCommentsForRun(context, runId),
+    getMetaResultForRun: (context, runId) =>
+      getReviewMetaResultForRun(context, runId),
     createRunId: () => crypto.randomUUID(),
     getNow: () => Date.now(),
     getThinkingLevel: () => pi.getThinkingLevel() as PiReviewThinkingLevel,

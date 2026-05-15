@@ -5,6 +5,8 @@ import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 
 import {
   REVIEW_ANCHOR_MESSAGE_TYPE,
+  REVIEW_META_PROMPT_ENTRY_TYPE,
+  REVIEW_META_SUMMARY_ENTRY_TYPE,
   REVIEW_PROMPT_ENTRY_TYPE,
   REVIEW_SUMMARY_ENTRY_TYPE,
   buildReviewBranchSummary,
@@ -13,6 +15,7 @@ import {
 import type {
   ResolvedReviewTarget,
   ReviewComment,
+  ReviewMetaResult,
   ReviewState,
 } from "../src/types.js";
 
@@ -100,6 +103,9 @@ type HarnessOptions = {
   inputWidgetResult?: InputWidgetResult;
   activeState?: ReviewState;
   inputWidgetDelay?: Promise<void>;
+  metaResult?: ReviewMetaResult;
+  runIds?: string[];
+  sendUserMessageErrorAt?: number;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -118,6 +124,7 @@ function createHarness(options: HarnessOptions = {}) {
     options: { summarize?: boolean; label?: string };
   }> = [];
   const startedRuns: unknown[] = [];
+  const startedMetaRuns: unknown[] = [];
   const clearedRuns: unknown[] = [];
   const editorInputs: Array<{ title: string; initialValue: string }> = [];
   const inputWidgetCalls: InputWidgetCall[] = [];
@@ -125,6 +132,8 @@ function createHarness(options: HarnessOptions = {}) {
   const draftRequests: unknown[] = [];
   const draftOptions: unknown[] = [];
   const reviewGuidelineReads: number[] = [];
+  let sentUserMessageAttempts = 0;
+  let metaResult = options.metaResult;
   let currentState: ReviewState = options.activeState ?? {
     version: 1,
     activeKind: null,
@@ -133,6 +142,7 @@ function createHarness(options: HarnessOptions = {}) {
   const target = options.target ?? promptTarget();
   const draftOk = options.draftOk ?? true;
   const navigateResults = [...(options.navigateResults ?? [])];
+  const runIds = [...(options.runIds ?? ["meta-1", "review-1", "fix-1"])];
   const anchorLeafId = options.anchorLeafId ?? "leaf-anchor";
   let leafId =
     options.initialLeafId === undefined ? "leaf-origin" : options.initialLeafId;
@@ -140,6 +150,10 @@ function createHarness(options: HarnessOptions = {}) {
   const controller = createReviewFlowController({
     pi: {
       sendUserMessage: (message: string) => {
+        sentUserMessageAttempts += 1;
+        if (sentUserMessageAttempts === options.sendUserMessageErrorAt) {
+          throw new Error("send failed");
+        }
         sentUserMessages.push(message);
       },
       appendEntry: (customType: string, data: unknown) => {
@@ -166,6 +180,10 @@ function createHarness(options: HarnessOptions = {}) {
     },
     stateManager: {
       getState: () => currentState,
+      startMetaRun: (_ctx, state) => {
+        startedMetaRuns.push(state);
+        currentState = { version: 1, activeKind: "meta", ...state };
+      },
       startReviewRun: (_ctx, state) => {
         startedRuns.push(state);
         currentState = { version: 1, activeKind: "review", ...state };
@@ -201,7 +219,8 @@ function createHarness(options: HarnessOptions = {}) {
         : { ok: false, error: "LLM unavailable" };
     },
     getCommentsForRun: () => [comment()],
-    createRunId: () => "review-1",
+    getMetaResultForRun: () => metaResult,
+    createRunId: () => runIds.shift() ?? "run-extra",
     getNow: () => 456,
     getThinkingLevel: () => "high",
     ...(options.inputWidgetResult === undefined
@@ -227,6 +246,8 @@ function createHarness(options: HarnessOptions = {}) {
       getEntries: () => [],
     },
     waitForIdle: async () => {},
+    isIdle: () => true,
+    hasPendingMessages: () => false,
     navigateTree: async (
       targetId: string,
       navOptions: { summarize?: boolean; label?: string },
@@ -263,6 +284,7 @@ function createHarness(options: HarnessOptions = {}) {
     appended,
     navigateCalls,
     startedRuns,
+    startedMetaRuns,
     clearedRuns,
     editorInputs,
     inputWidgetCalls,
@@ -270,10 +292,91 @@ function createHarness(options: HarnessOptions = {}) {
     draftRequests,
     draftOptions,
     reviewGuidelineReads,
+    setMetaResult: (nextMetaResult: ReviewMetaResult | undefined) => {
+      metaResult = nextMetaResult;
+    },
   };
 }
 
-test("review flow launches branch after human submits generated prompt", async () => {
+function reviewMetaResult(
+  overrides: Partial<ReviewMetaResult> = {},
+): ReviewMetaResult {
+  return {
+    version: 1,
+    runId: "meta-1",
+    targetHint: "review auth boundaries",
+    reviewPrompt: "Generated rich review prompt",
+    summary: "Checked auth boundaries and token refresh risk.",
+    createdAt: 234,
+    ...overrides,
+  };
+}
+
+async function flushScheduledWork(times = 5): Promise<void> {
+  for (let index = 0; index < times; index += 1) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  }
+}
+
+async function completeMetaPass(
+  harness: ReturnType<typeof createHarness>,
+): Promise<void> {
+  const metaPrompt = harness.sentUserMessages[0];
+  assert.equal(typeof metaPrompt, "string");
+  harness.setMetaResult(reviewMetaResult());
+
+  await harness.controller.handleBeforeAgentStart(
+    {
+      type: "before_agent_start",
+      prompt: metaPrompt,
+      systemPrompt: "base system",
+    },
+    harness.ctx,
+  );
+  await harness.controller.handleAgentEnd(
+    { messages: [{ role: "user", content: metaPrompt }] },
+    { sessionManager: harness.ctx.sessionManager } as never,
+  );
+  await flushScheduledWork();
+}
+
+async function startReviewThroughMeta(
+  harness: ReturnType<typeof createHarness>,
+  args = "review auth boundaries",
+): Promise<void> {
+  await harness.controller.handleReviewCommand(args, harness.ctx);
+  await completeMetaPass(harness);
+}
+
+function resetCollapseArtifacts(
+  harness: ReturnType<typeof createHarness>,
+): void {
+  harness.navigateCalls.length = 0;
+  harness.appended.length = 0;
+  harness.clearedRuns.length = 0;
+}
+
+function assertStartedMetaPass(
+  harness: ReturnType<typeof createHarness>,
+  originLeafId = "leaf-origin",
+): void {
+  assert.equal(harness.startedMetaRuns.length, 1);
+  assert.match(harness.sentUserMessages[0] ?? "", /Review prompt meta-pass/);
+  assert.match(harness.sentUserMessages[0] ?? "", /Run ID: meta-1/);
+  assert.deepEqual(harness.startedMetaRuns[0], {
+    runId: "meta-1",
+    originLeafId,
+    targetHint: "review auth boundaries",
+    metaPrompt: harness.sentUserMessages[0],
+    originModelProvider: "anthropic",
+    originModelId: "claude-sonnet",
+    originThinkingLevel: "high",
+  });
+}
+
+test("review flow starts meta-pass before human prompt editor", async () => {
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
   await harness.controller.handleReviewCommand(
@@ -282,15 +385,10 @@ test("review flow launches branch after human submits generated prompt", async (
   );
 
   assert.deepEqual(harness.notifications, [
-    { message: "Generating review prompt draft…", level: "info" },
-    { message: "Review branch started: review-1", level: "info" },
+    { message: "Starting review prompt meta-pass: meta-1", level: "info" },
   ]);
-  assert.equal(harness.editorInputs.length, 1);
-  assert.deepEqual(harness.editorInputs[0], {
-    title: "Edit review prompt",
-    initialValue: "Generated review prompt",
-  });
-  assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
+  assert.deepEqual(harness.editorInputs, []);
+  assert.deepEqual(harness.startedRuns, []);
   assert.deepEqual(harness.resolvedTargets, [
     {
       kind: "prompt",
@@ -298,18 +396,8 @@ test("review flow launches branch after human submits generated prompt", async (
       targetHint: "review auth boundaries",
     },
   ]);
-  assert.deepEqual(harness.startedRuns, [
-    {
-      runId: "review-1",
-      originLeafId: "leaf-origin",
-      targetHint: "review auth boundaries",
-      reviewPrompt: "Edited review prompt",
-      originModelProvider: "anthropic",
-      originModelId: "claude-sonnet",
-      originThinkingLevel: "high",
-    },
-  ]);
-  assert.equal(harness.draftRequests.length, 1);
+  assertStartedMetaPass(harness);
+  assert.equal(harness.draftRequests.length, 0);
 });
 
 test("review flow rejects a second review while a run is active", async () => {
@@ -324,11 +412,11 @@ test("review flow rejects a second review while a run is active", async () => {
     harness.ctx,
   );
 
-  assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
-  assert.equal(harness.startedRuns.length, 1);
+  assert.equal(harness.sentUserMessages.length, 1);
+  assert.equal(harness.startedMetaRuns.length, 1);
   assert.deepEqual(harness.notifications.at(-1), {
     message:
-      "Cannot start review: pi-review-code review review-1 is still active.",
+      "Cannot start review: pi-review-code review prompt meta-pass meta-1 is still active.",
     level: "error",
   });
 });
@@ -529,8 +617,8 @@ test("review flow rejects overlapping launch while widget is pending", async () 
   releaseWidget();
   await firstLaunch;
 
-  assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
-  assert.equal(harness.startedRuns.length, 1);
+  assert.equal(harness.sentUserMessages.length, 1);
+  assertStartedMetaPass(harness);
 });
 
 test("review flow prompts for target and context before launching", async () => {
@@ -540,6 +628,10 @@ test("review flow prompts for target and context before launching", async () => 
       submitted: true,
       kind: "review",
       primaryValue: "review auth boundaries",
+      reviewContext: "Focus on token refresh races.",
+    },
+    target: {
+      ...promptTarget(),
       reviewContext: "Focus on token refresh races.",
     },
   });
@@ -560,7 +652,10 @@ test("review flow prompts for target and context before launching", async () => 
       reviewContext: "Focus on token refresh races.",
     },
   ]);
-  assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
+  assert.match(
+    harness.sentUserMessages[0] ?? "",
+    /Focus on token refresh races\./,
+  );
 });
 
 test("review flow pre-fills widget from command args", async () => {
@@ -755,21 +850,10 @@ test("review flow anchors an empty session before branch launch", async () => {
   assert.equal(harness.sentMessages[0]?.customType, REVIEW_ANCHOR_MESSAGE_TYPE);
   assert.equal(harness.sentMessages[0]?.display, false);
   assert.deepEqual(harness.sentMessages[0]?.options, { triggerTurn: false });
-  assert.deepEqual(harness.sentUserMessages, ["Edited review prompt"]);
-  assert.deepEqual(harness.startedRuns, [
-    {
-      runId: "review-1",
-      originLeafId: "leaf-anchor",
-      targetHint: "review auth boundaries",
-      reviewPrompt: "Edited review prompt",
-      originModelProvider: "anthropic",
-      originModelId: "claude-sonnet",
-      originThinkingLevel: "high",
-    },
-  ]);
+  assertStartedMetaPass(harness, "leaf-anchor");
 });
 
-test("review flow launches PR review after resolving PR metadata", async () => {
+test("review flow launches PR meta-pass after resolving PR metadata", async () => {
   const selector = "https://github.com/owner/repo/pull/123";
   const harness = createHarness({
     editorResult: "Edited PR review prompt",
@@ -807,45 +891,16 @@ test("review flow launches PR review after resolving PR metadata", async () => {
   assert.deepEqual(harness.resolvedTargets, [
     { kind: "pr", selector, targetHint: selector },
   ]);
-  assert.deepEqual(harness.draftRequests, [
-    {
-      kind: "pr",
-      targetHint: selector,
-      selector,
-      files: ["src/auth.ts"],
-      commandHints: [
-        {
-          label: "Show PR diff",
-          command: "gh",
-          args: ["pr", "diff", selector],
-        },
-      ],
-      provider: "github",
-      number: 123,
-      title: "Fix auth",
-      body: "Tighten auth checks.",
-      url: selector,
-      author: "alice",
-      baseRefName: "main",
-      headRefName: "auth-fix",
-      existingNotes: ["bob: existing concern"],
-    },
-  ]);
-  assert.deepEqual(harness.sentUserMessages, ["Edited PR review prompt"]);
-  assert.deepEqual(harness.startedRuns, [
-    {
-      runId: "review-1",
-      originLeafId: "leaf-origin",
-      targetHint: selector,
-      reviewPrompt: "Edited PR review prompt",
-      originModelProvider: "anthropic",
-      originModelId: "claude-sonnet",
-      originThinkingLevel: "high",
-    },
-  ]);
+  assert.equal(harness.draftRequests.length, 0);
+  assert.match(harness.sentUserMessages[0] ?? "", /Tighten auth checks\./);
+  assert.match(harness.sentUserMessages[0] ?? "", /bob: existing concern/);
+  assert.match(
+    JSON.stringify(harness.startedMetaRuns[0]),
+    new RegExp(selector),
+  );
 });
 
-test("review flow passes resolved diff text to prompt draft builder", async () => {
+test("review flow passes resolved diff text to meta prompt", async () => {
   const target: ResolvedReviewTarget = {
     kind: "diff-against",
     targetHint: "origin/main",
@@ -873,13 +928,14 @@ test("review flow passes resolved diff text to prompt draft builder", async () =
 
   await harness.controller.handleReviewCommand("origin/main", harness.ctx);
 
-  assert.deepEqual(harness.draftRequests, [target]);
-  assert.deepEqual(harness.draftOptions, [
-    { diffText: "diff --git a/src/auth.ts b/src/auth.ts\n+rotateToken();" },
-  ]);
+  assert.equal(harness.draftRequests.length, 0);
+  assert.match(
+    harness.sentUserMessages[0] ?? "",
+    /diff --git a\/src\/auth\.ts b\/src\/auth\.ts\n\+rotateToken\(\);/,
+  );
 });
 
-test("review flow passes REVIEW_GUIDELINES.md content to prompt draft builder", async () => {
+test("review flow passes REVIEW_GUIDELINES.md content to meta prompt", async () => {
   const harness = createHarness({
     editorResult: "Edited prompt",
     reviewGuidelines: "Require tests for changed behavior.",
@@ -891,9 +947,11 @@ test("review flow passes REVIEW_GUIDELINES.md content to prompt draft builder", 
   );
 
   assert.deepEqual(harness.reviewGuidelineReads, [1]);
-  assert.deepEqual(harness.draftOptions, [
-    { reviewGuidelines: "Require tests for changed behavior." },
-  ]);
+  assert.equal(harness.draftOptions.length, 0);
+  assert.match(
+    harness.sentUserMessages[0] ?? "",
+    /Require tests for changed behavior\./,
+  );
 });
 
 test("review flow aborts when repository guidelines cannot be read", async () => {
@@ -922,8 +980,9 @@ test("review flow cancels cleanly when editor returns undefined", async () => {
     "review auth boundaries",
     harness.ctx,
   );
+  await completeMetaPass(harness);
 
-  assert.deepEqual(harness.sentUserMessages, []);
+  assert.equal(harness.sentUserMessages.length, 1);
   assert.deepEqual(harness.startedRuns, []);
   assert.deepEqual(harness.notifications.at(-1), {
     message: "Review cancelled before branch launch.",
@@ -931,18 +990,160 @@ test("review flow cancels cleanly when editor returns undefined", async () => {
   });
 });
 
-test("review flow fails closed when LLM draft generation fails", async () => {
-  const harness = createHarness({ draftOk: false });
+test("review flow fails closed when meta-pass omits result tool", async () => {
+  const harness = createHarness();
 
   await harness.controller.handleReviewCommand(
     "review auth boundaries",
     harness.ctx,
   );
 
-  assert.deepEqual(harness.sentUserMessages, []);
+  const metaPrompt = harness.sentUserMessages[0] ?? "";
+  await harness.controller.handleBeforeAgentStart(
+    {
+      type: "before_agent_start",
+      prompt: metaPrompt,
+      systemPrompt: "base system",
+    },
+    harness.ctx,
+  );
+  await harness.controller.handleAgentEnd(
+    { messages: [{ role: "user", content: metaPrompt }] },
+    { sessionManager: harness.ctx.sessionManager } as never,
+  );
+  await flushScheduledWork();
+
+  assert.equal(harness.sentUserMessages.length, 1);
   assert.deepEqual(harness.startedRuns, []);
+  assert.equal(harness.clearedRuns.length, 1);
   assert.deepEqual(harness.notifications.at(-1), {
-    message: "LLM unavailable",
+    message:
+      "Review prompt meta-pass meta-1 ended without set_review_prompt; review was not started.",
+    level: "error",
+  });
+});
+
+test("session_before_tree returns pending meta summary in Pi event shape", async () => {
+  const harness = createHarness({ editorResult: "Edited review prompt" });
+
+  await startReviewThroughMeta(harness);
+
+  const result = await harness.controller.handleSessionBeforeTree({
+    preparation: {
+      label: "review-meta:meta-1",
+      targetId: "leaf-origin",
+      userWantsSummary: true,
+    },
+  } as never);
+
+  assert.match(
+    result?.summary?.summary ?? "",
+    /pi-review-code review prompt meta-pass meta-1/,
+  );
+  assert.match(result?.summary?.summary ?? "", /Generated rich review prompt/);
+  assert.equal(result?.summary?.details?.kind, "meta");
+});
+
+test("review flow clears meta state when meta collapse is cancelled", async () => {
+  const harness = createHarness({
+    editorResult: "Edited review prompt",
+    navigateResults: [{ cancelled: true }],
+  });
+
+  await harness.controller.handleReviewCommand(
+    "review auth boundaries",
+    harness.ctx,
+  );
+  await completeMetaPass(harness);
+
+  assert.deepEqual(harness.editorInputs, []);
+  assert.deepEqual(harness.startedRuns, []);
+  assert.equal(harness.clearedRuns.length, 1);
+  assert.deepEqual(harness.appended, []);
+  assert.deepEqual(harness.notifications.at(-1), {
+    message:
+      "Review prompt meta-pass meta-1 collapse cancelled; review was not started.",
+    level: "error",
+  });
+
+  const summary = await harness.controller.handleSessionBeforeTree({
+    preparation: {
+      label: "review-meta:meta-1",
+      targetId: "leaf-origin",
+      userWantsSummary: true,
+    },
+  } as never);
+  assert.equal(summary, undefined);
+});
+
+test("review flow clears meta state when meta collapse throws", async () => {
+  const harness = createHarness({
+    editorResult: "Edited review prompt",
+    navigateResults: [new Error("tree navigation failed")],
+  });
+
+  await harness.controller.handleReviewCommand(
+    "review auth boundaries",
+    harness.ctx,
+  );
+  await completeMetaPass(harness);
+
+  assert.deepEqual(harness.editorInputs, []);
+  assert.deepEqual(harness.startedRuns, []);
+  assert.equal(harness.clearedRuns.length, 1);
+  assert.deepEqual(harness.appended, []);
+  assert.deepEqual(harness.notifications.at(-1), {
+    message:
+      "Review prompt meta-pass meta-1 collapse failed: tree navigation failed",
+    level: "error",
+  });
+});
+
+test("review flow starts final review after completed meta-pass", async () => {
+  const harness = createHarness({ editorResult: "Edited review prompt" });
+
+  await startReviewThroughMeta(harness);
+
+  assert.deepEqual(harness.navigateCalls, [
+    {
+      targetId: "leaf-origin",
+      options: { summarize: true, label: "review-meta:meta-1" },
+    },
+  ]);
+  assert.deepEqual(harness.editorInputs, [
+    {
+      title: "Edit review prompt",
+      initialValue: "Generated rich review prompt",
+    },
+  ]);
+  assert.deepEqual(harness.sentUserMessages.slice(1), ["Edited review prompt"]);
+  assert.deepEqual(harness.startedRuns, [
+    {
+      runId: "review-1",
+      originLeafId: "leaf-origin",
+      targetHint: "review auth boundaries",
+      reviewPrompt: "Edited review prompt",
+      originModelProvider: "anthropic",
+      originModelId: "claude-sonnet",
+      originThinkingLevel: "high",
+    },
+  ]);
+});
+
+test("review flow clears partial review state when handoff send fails", async () => {
+  const harness = createHarness({
+    editorResult: "Edited review prompt",
+    sendUserMessageErrorAt: 2,
+  });
+
+  await startReviewThroughMeta(harness);
+
+  assert.equal(harness.sentUserMessages.length, 1);
+  assert.match(harness.sentUserMessages[0] ?? "", /Review prompt meta-pass/);
+  assert.equal(harness.startedRuns.length, 1);
+  assert.equal(harness.clearedRuns.length, 2);
+  assert.deepEqual(harness.notifications.at(-1), {
+    message: "Review prompt handoff failed after meta-pass meta-1: send failed",
     level: "error",
   });
 });
@@ -980,16 +1181,26 @@ test("review flow requires active model", async () => {
 test("review flow emits custom prompt and summary messages for renderers", async () => {
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
-  await harness.controller.handleReviewCommand(
-    "review auth boundaries",
-    harness.ctx,
-  );
+  await startReviewThroughMeta(harness);
 
-  assert.equal(harness.sentMessages.length, 1);
-  assert.equal(harness.sentMessages[0]?.customType, REVIEW_PROMPT_ENTRY_TYPE);
-  assert.equal(harness.sentMessages[0]?.content, "Review prompt review-1");
-  assert.equal(harness.sentMessages[0]?.display, true);
-  assert.deepEqual(harness.sentMessages[0]?.details, {
+  assert.equal(harness.sentMessages.length, 3);
+  assert.equal(
+    harness.sentMessages[0]?.customType,
+    REVIEW_META_PROMPT_ENTRY_TYPE,
+  );
+  assert.equal(
+    harness.sentMessages[0]?.content,
+    "Review prompt meta-pass meta-1",
+  );
+  assert.equal(
+    harness.sentMessages[1]?.customType,
+    REVIEW_META_SUMMARY_ENTRY_TYPE,
+  );
+  assert.equal(harness.sentMessages[1]?.content, "Review prompt ready meta-1.");
+  assert.equal(harness.sentMessages[2]?.customType, REVIEW_PROMPT_ENTRY_TYPE);
+  assert.equal(harness.sentMessages[2]?.content, "Review prompt review-1");
+  assert.equal(harness.sentMessages[2]?.display, true);
+  assert.deepEqual(harness.sentMessages[2]?.details, {
     kind: "prompt",
     mode: "review",
     runId: "review-1",
@@ -1004,15 +1215,15 @@ test("review flow emits custom prompt and summary messages for renderers", async
     sessionManager: harness.ctx.sessionManager,
   } as never);
 
-  assert.equal(harness.sentMessages.length, 2);
-  assert.equal(harness.sentMessages[1]?.customType, REVIEW_SUMMARY_ENTRY_TYPE);
+  assert.equal(harness.sentMessages.length, 4);
+  assert.equal(harness.sentMessages[3]?.customType, REVIEW_SUMMARY_ENTRY_TYPE);
   assert.equal(
-    harness.sentMessages[1]?.content,
+    harness.sentMessages[3]?.content,
     "Review findings review-1 completed with 1 finding.",
   );
-  assert.equal(harness.sentMessages[1]?.display, true);
+  assert.equal(harness.sentMessages[3]?.display, true);
   assert.match(
-    JSON.stringify(harness.sentMessages[1]?.details),
+    JSON.stringify(harness.sentMessages[3]?.details),
     /Token refresh can race/,
   );
 });
@@ -1020,10 +1231,8 @@ test("review flow emits custom prompt and summary messages for renderers", async
 test("review flow collapses active branch on agent end with custom summary", async () => {
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
-  await harness.controller.handleReviewCommand(
-    "review auth boundaries",
-    harness.ctx,
-  );
+  await startReviewThroughMeta(harness);
+  resetCollapseArtifacts(harness);
   await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
     sessionManager: harness.ctx.sessionManager,
   } as never);
@@ -1046,10 +1255,8 @@ test("review flow collapses active branch on agent end with custom summary", asy
 test("review flow ignores unrelated agent_end events", async () => {
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
-  await harness.controller.handleReviewCommand(
-    "review auth boundaries",
-    harness.ctx,
-  );
+  await startReviewThroughMeta(harness);
+  resetCollapseArtifacts(harness);
   await harness.controller.handleAgentEnd(
     { messages: [{ role: "user", content: "Unrelated prompt" }] },
     { sessionManager: harness.ctx.sessionManager } as never,
@@ -1070,13 +1277,15 @@ test("review flow ignores unrelated agent_end events", async () => {
 test("review flow keeps active state when collapse is cancelled", async () => {
   const harness = createHarness({
     editorResult: "Edited review prompt",
-    navigateResults: [{ cancelled: true }, { cancelled: false }],
+    navigateResults: [
+      { cancelled: false },
+      { cancelled: true },
+      { cancelled: false },
+    ],
   });
 
-  await harness.controller.handleReviewCommand(
-    "review auth boundaries",
-    harness.ctx,
-  );
+  await startReviewThroughMeta(harness);
+  resetCollapseArtifacts(harness);
   await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
     sessionManager: harness.ctx.sessionManager,
   } as never);
@@ -1098,15 +1307,14 @@ test("review flow keeps active state when collapse throws", async () => {
   const harness = createHarness({
     editorResult: "Edited review prompt",
     navigateResults: [
+      { cancelled: false },
       new Error("tree navigation failed"),
       { cancelled: false },
     ],
   });
 
-  await harness.controller.handleReviewCommand(
-    "review auth boundaries",
-    harness.ctx,
-  );
+  await startReviewThroughMeta(harness);
+  resetCollapseArtifacts(harness);
   await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
     sessionManager: harness.ctx.sessionManager,
   } as never);
@@ -1127,10 +1335,8 @@ test("review flow keeps active state when collapse throws", async () => {
 test("session_before_tree returns pending review summary in Pi event shape", async () => {
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
-  await harness.controller.handleReviewCommand(
-    "review auth boundaries",
-    harness.ctx,
-  );
+  await startReviewThroughMeta(harness);
+  resetCollapseArtifacts(harness);
   await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
     sessionManager: harness.ctx.sessionManager,
   } as never);
@@ -1154,10 +1360,8 @@ test("session_before_tree returns pending review summary in Pi event shape", asy
 test("session_before_tree ignores review summary for mismatched target", async () => {
   const harness = createHarness({ editorResult: "Edited review prompt" });
 
-  await harness.controller.handleReviewCommand(
-    "review auth boundaries",
-    harness.ctx,
-  );
+  await startReviewThroughMeta(harness);
+  resetCollapseArtifacts(harness);
   await harness.controller.handleAgentEnd(harness.reviewAgentEndEvent, {
     sessionManager: harness.ctx.sessionManager,
   } as never);

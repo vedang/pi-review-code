@@ -7,6 +7,7 @@ import type {
   RegisteredCommand,
 } from "@mariozechner/pi-coding-agent";
 
+import { REVIEW_ANCHOR_MESSAGE_TYPE } from "../src/flow.js";
 import reviewCodeExtension, {
   REVIEW_FIX_HELP_TEXT,
   REVIEW_HELP_TEXT,
@@ -22,6 +23,9 @@ type RegisteredEventHandler = (
 
 type RuntimeHarnessOptions = {
   stateData?: unknown;
+  customResult?: unknown;
+  initialLeafId?: string | null;
+  anchorLeafId?: string;
 };
 
 function persistedReviewState(): Record<string, unknown> {
@@ -108,21 +112,28 @@ function createRuntimeHarness(options: RuntimeHarnessOptions = {}) {
   const appended: Array<{ customType: string; data: unknown }> = [];
   const notifications: Array<{ message: string; level: string }> = [];
   const customWidgetCalls: Array<{ options: unknown }> = [];
+  const sentMessages: Array<{ message: unknown; options: unknown }> = [];
+  const sentUserMessages: string[] = [];
   let activeTools = ["read", "bash", "add_review_comment"];
+  let leafId =
+    options.initialLeafId === undefined ? "leaf-origin" : options.initialLeafId;
+  const anchorLeafId = options.anchorLeafId ?? "leaf-anchor";
 
   const ctx = {
     hasUI: true,
     model: { provider: "anthropic", id: "claude-sonnet" },
+    modelRegistry: { registry: true },
     ui: {
       notify: (message: string, level: string) => {
         notifications.push({ message, level });
       },
-      custom: async (_createWidget: unknown, options: unknown) => {
-        customWidgetCalls.push({ options });
-        return { submitted: false };
+      custom: async (_createWidget: unknown, widgetOptions: unknown) => {
+        customWidgetCalls.push({ options: widgetOptions });
+        return options.customResult ?? { submitted: false };
       },
     },
     sessionManager: {
+      getLeafId: () => leafId,
       getEntries: () => [
         {
           type: "custom",
@@ -131,6 +142,9 @@ function createRuntimeHarness(options: RuntimeHarnessOptions = {}) {
         },
       ],
     },
+    waitForIdle: async () => {},
+    isIdle: () => true,
+    hasPendingMessages: () => false,
   } as unknown as ExtensionCommandContext;
 
   const pi = {
@@ -157,8 +171,21 @@ function createRuntimeHarness(options: RuntimeHarnessOptions = {}) {
       setActiveToolsCalls.push(toolNames);
       activeTools = toolNames;
     },
-    sendMessage: () => {},
-    sendUserMessage: () => {},
+    sendMessage: (message: unknown, sendOptions: unknown) => {
+      sentMessages.push({ message, options: sendOptions });
+      if (
+        typeof message === "object" &&
+        message !== null &&
+        "customType" in message &&
+        message.customType === REVIEW_ANCHOR_MESSAGE_TYPE &&
+        sendOptions !== undefined
+      ) {
+        leafId = anchorLeafId;
+      }
+    },
+    sendUserMessage: (message: string) => {
+      sentUserMessages.push(message);
+    },
     exec: async () => ({ stdout: "", stderr: "", code: 0 }),
     getThinkingLevel: () => "high",
   } as unknown as ExtensionAPI;
@@ -174,6 +201,8 @@ function createRuntimeHarness(options: RuntimeHarnessOptions = {}) {
     appended,
     notifications,
     customWidgetCalls,
+    sentMessages,
+    sentUserMessages,
     ctx,
   };
 }
@@ -254,6 +283,26 @@ test("/review opens runtime input widget", async () => {
   assert.equal(harness.customWidgetCalls.length, 1);
   assert.equal(harness.customWidgetCalls[0]?.options, undefined);
   assertSingleNotification(harness, "Review cancelled.");
+});
+
+test("/review forwards anchor sendMessage options on empty sessions", async () => {
+  const harness = createRuntimeHarness({
+    initialLeafId: null,
+    customResult: {
+      submitted: true,
+      kind: "review",
+      primaryValue: "review auth boundaries",
+    },
+  });
+
+  await runCommand(harness, "review");
+
+  assert.equal(
+    (harness.sentMessages[0]?.message as { customType?: string }).customType,
+    REVIEW_ANCHOR_MESSAGE_TYPE,
+  );
+  assert.deepEqual(harness.sentMessages[0]?.options, { triggerTurn: false });
+  assert.match(harness.sentUserMessages[0] ?? "", /Review prompt meta-pass/);
 });
 
 test("runtime does not register legacy selector commands", () => {

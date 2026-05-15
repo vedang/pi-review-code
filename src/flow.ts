@@ -25,6 +25,7 @@ import type {
 } from "./prompts.js";
 import {
   buildReviewFixPrompt,
+  buildReviewMetaPassPrompt,
   buildReviewMetaSystemPrompt,
 } from "./prompts.js";
 import type {
@@ -258,6 +259,38 @@ function normalizeOptionalText(value?: string): string | undefined {
 function withFixContext(fixContext?: string): { fixContext?: string } {
   const normalized = normalizeOptionalText(fixContext);
   return normalized === undefined ? {} : { fixContext: normalized };
+}
+
+export function buildReviewMetaBranchSummary(
+  input: BuildReviewMetaBranchSummaryInput,
+): ReviewMetaBranchSummary {
+  const summaryLines = [
+    `pi-review-code review prompt meta-pass ${input.runId}`,
+    `Target: ${input.targetHint}`,
+    `Meta prompt: ${input.metaPrompt}`,
+    "",
+    `Generated review prompt: ${input.result.reviewPrompt}`,
+  ];
+
+  const normalizedSummary = normalizeOptionalText(input.result.summary);
+  if (normalizedSummary !== undefined) {
+    summaryLines.push("", `Meta-pass summary: ${normalizedSummary}`);
+  }
+
+  return {
+    summary: summaryLines.join("\n"),
+    details: {
+      kind: "meta",
+      runId: input.runId,
+      targetHint: input.targetHint,
+      metaPrompt: input.metaPrompt,
+      reviewPrompt: input.result.reviewPrompt,
+      completedAt: input.completedAt,
+      ...(normalizedSummary === undefined
+        ? {}
+        : { summary: normalizedSummary }),
+    },
+  };
 }
 
 export function buildReviewBranchSummary(
@@ -765,6 +798,7 @@ type GetCommentsForRun = (
 
 type ReviewFlowStateManager = {
   getState: () => ReviewState;
+  startMetaRun: (ctx: { hasUI: boolean }, state: ReviewMetaRunInfo) => void;
   startReviewRun: (ctx: { hasUI: boolean }, state: ReviewActiveRunInfo) => void;
   startFixRun?: (ctx: { hasUI: boolean }, state: ReviewFixRunInfo) => void;
   clearActiveRun: (ctx: { hasUI: boolean }) => void;
@@ -784,6 +818,10 @@ type ReviewFlowDependencies = {
   readReviewGuidelines?: () => Promise<string | undefined>;
   generateDraft: GenerateDraft;
   getCommentsForRun: GetCommentsForRun;
+  getMetaResultForRun: (
+    context: { sessionManager: ExtensionContext["sessionManager"] },
+    runId: string,
+  ) => ReviewMetaResult | undefined;
   getThinkingLevel: () => PiReviewThinkingLevel;
   createRunId: () => string;
   getNow: () => number;
@@ -799,6 +837,13 @@ type ReviewLaunchContext = {
   thinkingLevel: PiReviewThinkingLevel;
 };
 
+type ActiveMetaRun = ReviewMetaRunInfo & {
+  kind: "meta";
+  commandCtx: ExtensionCommandContext;
+  launchContext: ReviewLaunchContext;
+  owned: boolean;
+};
+
 type ActiveReviewRun = ReviewActiveRunInfo & {
   kind: "review";
   commandCtx: ExtensionCommandContext;
@@ -810,34 +855,49 @@ type ActiveFixRun = ReviewFixRunInfo & {
   selectedComments: ReviewComment[];
 };
 
+const REVIEW_META_SUMMARY_ENTRY = "review-meta";
 const REVIEW_SUMMARY_ENTRY = "review";
 const REVIEW_FIX_SUMMARY_ENTRY = "review-fix";
 
-type ActiveReviewRunState = ActiveReviewRun | ActiveFixRun;
+type ActiveReviewRunState = ActiveMetaRun | ActiveReviewRun | ActiveFixRun;
+type ActiveReviewCompletionRunState = ActiveReviewRun | ActiveFixRun;
 
 type PendingSummary = {
   runId: string;
   targetId: string;
-  summary: ReviewBranchSummary | FixBranchSummary;
+  summary: ReviewMetaBranchSummary | ReviewBranchSummary | FixBranchSummary;
 };
 
-function agentEndMatchesRun(
+function agentEndMatchesPrompt(
   event: unknown,
-  run: ActiveReviewRunState,
+  expectedPrompt: string,
 ): boolean {
   if (!isRecord(event) || !Array.isArray(event.messages)) {
     return false;
   }
 
-  const expectedPrompt = run.reviewPrompt.trim();
+  const normalizedExpectedPrompt = expectedPrompt.trim();
 
   return event.messages.some((message) => {
     if (!isRecord(message) || message.role !== "user") {
       return false;
     }
 
-    return extractTextContent(message.content).trim() === expectedPrompt;
+    return (
+      extractTextContent(message.content).trim() === normalizedExpectedPrompt
+    );
   });
+}
+
+function agentEndMatchesRun(
+  event: unknown,
+  run: ActiveReviewCompletionRunState,
+): boolean {
+  return agentEndMatchesPrompt(event, run.reviewPrompt);
+}
+
+function agentEndMatchesMetaRun(event: unknown, run: ActiveMetaRun): boolean {
+  return agentEndMatchesPrompt(event, run.metaPrompt);
 }
 
 function getLeafId(ctx: ExtensionCommandContext): string | null {
@@ -867,6 +927,10 @@ function ensureOriginLeafId(
 }
 
 function extractLabelPrefix(label: string): string | undefined {
+  if (label.startsWith("review-meta:")) {
+    return REVIEW_META_SUMMARY_ENTRY;
+  }
+
   if (label.startsWith("review-fix:")) {
     return REVIEW_FIX_SUMMARY_ENTRY;
   }
@@ -898,9 +962,31 @@ function sendPromptMessage(
   });
 }
 
-function buildSummaryMessageContent(
-  summary: ReviewBranchSummary | FixBranchSummary,
+function buildMetaPromptMessageContent(
+  details: ReviewMetaPromptMessageDetails,
 ): string {
+  return `Review prompt meta-pass ${details.runId}`;
+}
+
+function sendMetaPromptMessage(
+  runtime: ReviewFlowRuntime,
+  details: ReviewMetaPromptMessageDetails,
+): void {
+  runtime.sendMessage?.({
+    customType: REVIEW_META_PROMPT_ENTRY_TYPE,
+    content: buildMetaPromptMessageContent(details),
+    display: true,
+    details,
+  });
+}
+
+function buildSummaryMessageContent(
+  summary: ReviewMetaBranchSummary | ReviewBranchSummary | FixBranchSummary,
+): string {
+  if (summary.details.kind === "meta") {
+    return `Review prompt ready ${summary.details.runId}.`;
+  }
+
   const count = summary.details.comments.length;
   const findingText = `${count} finding${count === 1 ? "" : "s"}`;
 
@@ -913,13 +999,16 @@ function buildSummaryMessageContent(
 
 function sendSummaryMessage(
   runtime: ReviewFlowRuntime,
-  summary: ReviewBranchSummary | FixBranchSummary,
+  summary: ReviewMetaBranchSummary | ReviewBranchSummary | FixBranchSummary,
 ): void {
+  const summaryEntryType = {
+    meta: REVIEW_META_SUMMARY_ENTRY_TYPE,
+    review: REVIEW_SUMMARY_ENTRY_TYPE,
+    fix: REVIEW_FIX_SUMMARY_ENTRY_TYPE,
+  }[summary.details.kind];
+
   runtime.sendMessage?.({
-    customType:
-      summary.details.kind === "review"
-        ? REVIEW_SUMMARY_ENTRY_TYPE
-        : REVIEW_FIX_SUMMARY_ENTRY_TYPE,
+    customType: summaryEntryType,
     content: buildSummaryMessageContent(summary),
     display: true,
     details: summary.details,
@@ -1137,6 +1226,47 @@ export function createReviewFlowController(
     dependencies.pi.sendUserMessage(reviewPrompt);
   }
 
+  function startMetaPass(
+    launchContext: ReviewLaunchContext,
+    ctx: ExtensionCommandContext,
+  ): void {
+    const runId = dependencies.createRunId();
+    const metaPrompt = buildReviewMetaPassPrompt(launchContext.resolvedTarget, {
+      ...launchContext.draftOptions,
+      runId,
+    });
+    const runInfo: ReviewMetaRunInfo = {
+      runId,
+      originLeafId: launchContext.originLeafId,
+      targetHint: launchContext.resolvedTarget.targetHint,
+      metaPrompt,
+      originModelProvider: launchContext.model.provider,
+      originModelId: launchContext.model.id,
+      originThinkingLevel: launchContext.thinkingLevel,
+    };
+
+    dependencies.stateManager.startMetaRun(ctx, runInfo);
+    activeRun = {
+      ...runInfo,
+      kind: "meta",
+      commandCtx: ctx,
+      launchContext,
+      owned: false,
+    };
+    sendMetaPromptMessage(dependencies.pi, {
+      kind: "meta-prompt",
+      runId: runInfo.runId,
+      targetHint: runInfo.targetHint,
+      metaPrompt: runInfo.metaPrompt,
+      originModelProvider: runInfo.originModelProvider,
+      originModelId: runInfo.originModelId,
+      originThinkingLevel: runInfo.originThinkingLevel,
+    });
+
+    ctx.ui.notify(`Starting review prompt meta-pass: ${runInfo.runId}`, "info");
+    dependencies.pi.sendUserMessage(metaPrompt);
+  }
+
   async function launchReview(
     target: ReviewTarget,
     ctx: ExtensionCommandContext,
@@ -1146,18 +1276,7 @@ export function createReviewFlowController(
       return;
     }
 
-    const draft = await generateReviewPromptDraft(launchContext, ctx);
-    if (draft === undefined) {
-      return;
-    }
-
-    const editedPrompt = await ctx.ui.editor("Edit review prompt", draft);
-    if (editedPrompt === undefined) {
-      ctx.ui.notify("Review cancelled before branch launch.", "info");
-      return;
-    }
-
-    startReviewFromPrompt(launchContext, ctx, editedPrompt);
+    startMetaPass(launchContext, ctx);
   }
 
   function buildWidgetConfig(prefill: {
@@ -1365,6 +1484,9 @@ export function createReviewFlowController(
     }
 
     if (event.prompt !== state.metaPrompt) {
+      if (activeRun?.kind === "meta" && activeRun.runId === state.runId) {
+        activeRun = null;
+      }
       dependencies.stateManager.clearActiveRun(ctx);
       if (ctx.hasUI) {
         ctx.ui.notify(
@@ -1373,6 +1495,10 @@ export function createReviewFlowController(
         );
       }
       return undefined;
+    }
+
+    if (activeRun?.kind === "meta" && activeRun.runId === state.runId) {
+      activeRun = { ...activeRun, owned: true };
     }
 
     const metaSystemPrompt = buildReviewMetaSystemPrompt({
@@ -1539,6 +1665,195 @@ export function createReviewFlowController(
     });
   }
 
+  function sleep(ms = 0): Promise<void> {
+    return new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  function isCurrentMetaRun(run: ActiveMetaRun): boolean {
+    return activeRun?.kind === "meta" && activeRun.runId === run.runId;
+  }
+
+  async function waitForContextDrain(
+    ctx: ExtensionCommandContext,
+  ): Promise<void> {
+    while (true) {
+      if (!ctx.isIdle()) {
+        await ctx.waitForIdle();
+        continue;
+      }
+
+      if (ctx.hasPendingMessages()) {
+        await sleep(25);
+        continue;
+      }
+
+      return;
+    }
+  }
+
+  async function waitForMetaRunDrain(run: ActiveMetaRun): Promise<boolean> {
+    while (isCurrentMetaRun(run)) {
+      if (!run.commandCtx.isIdle()) {
+        await run.commandCtx.waitForIdle();
+        continue;
+      }
+
+      if (run.commandCtx.hasPendingMessages()) {
+        await sleep(25);
+        continue;
+      }
+
+      return true;
+    }
+
+    return false;
+  }
+
+  function abandonMetaRun(run: ActiveMetaRun, message: string): void {
+    if (isCurrentMetaRun(run)) {
+      activeRun = null;
+    }
+    pendingSummaries.delete(run.runId);
+    dependencies.stateManager.clearActiveRun(run.commandCtx);
+    if (run.commandCtx.hasUI) {
+      run.commandCtx.ui.notify(message, "error");
+    }
+  }
+
+  async function runMetaPromptEditorHandoff(
+    run: ActiveMetaRun,
+    result: ReviewMetaResult,
+  ): Promise<void> {
+    try {
+      await waitForContextDrain(run.commandCtx);
+
+      const originLeafId = ensureOriginLeafId(run.commandCtx, dependencies.pi);
+      if (originLeafId === null) {
+        run.commandCtx.ui.notify(
+          "Cannot start review: no current branch leaf id after meta-pass collapse.",
+          "error",
+        );
+        return;
+      }
+
+      const editedPrompt = await run.commandCtx.ui.editor(
+        "Edit review prompt",
+        result.reviewPrompt,
+      );
+      if (editedPrompt === undefined) {
+        run.commandCtx.ui.notify(
+          "Review cancelled before branch launch.",
+          "info",
+        );
+        return;
+      }
+
+      startReviewFromPrompt(
+        { ...run.launchContext, originLeafId },
+        run.commandCtx,
+        editedPrompt,
+      );
+    } catch (error) {
+      if (activeRun?.kind === "review") {
+        activeRun = null;
+        dependencies.stateManager.clearActiveRun(run.commandCtx);
+      }
+      run.commandCtx.ui.notify(
+        `Review prompt handoff failed after meta-pass ${run.runId}: ${getErrorMessage(error, "handoff failed")}`,
+        "error",
+      );
+    } finally {
+      if (pendingLaunch === "review") {
+        pendingLaunch = null;
+      }
+    }
+  }
+
+  function scheduleMetaPromptEditorHandoff(
+    run: ActiveMetaRun,
+    result: ReviewMetaResult,
+  ): void {
+    pendingLaunch = "review";
+    setTimeout(() => {
+      void runMetaPromptEditorHandoff(run, result).catch((error: unknown) => {
+        if (pendingLaunch === "review") {
+          pendingLaunch = null;
+        }
+        run.commandCtx.ui.notify(
+          `Review prompt handoff failed after meta-pass ${run.runId}: ${getErrorMessage(error, "handoff failed")}`,
+          "error",
+        );
+      });
+    }, 0);
+  }
+
+  async function handleMetaAgentEnd(
+    run: ActiveMetaRun,
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    if (!(await waitForMetaRunDrain(run))) {
+      return;
+    }
+
+    const result = dependencies.getMetaResultForRun(
+      { sessionManager: ctx.sessionManager },
+      run.runId,
+    );
+    if (result === undefined) {
+      abandonMetaRun(
+        run,
+        `Review prompt meta-pass ${run.runId} ended without set_review_prompt; review was not started.`,
+      );
+      return;
+    }
+
+    const summary = buildReviewMetaBranchSummary({
+      runId: run.runId,
+      targetHint: run.targetHint,
+      metaPrompt: run.metaPrompt,
+      result,
+      completedAt: dependencies.getNow(),
+    });
+
+    pendingSummaries.set(run.runId, {
+      runId: run.runId,
+      targetId: run.originLeafId,
+      summary,
+    });
+
+    const collapseLabel = `${REVIEW_META_SUMMARY_ENTRY}:${run.runId}`;
+    let collapseResult: { cancelled: boolean };
+    try {
+      collapseResult = await run.commandCtx.navigateTree(run.originLeafId, {
+        summarize: true,
+        label: collapseLabel,
+      });
+    } catch (error) {
+      abandonMetaRun(
+        run,
+        `Review prompt meta-pass ${run.runId} collapse failed: ${getErrorMessage(error, "tree navigation failed")}`,
+      );
+      return;
+    }
+
+    if (collapseResult.cancelled) {
+      abandonMetaRun(
+        run,
+        `Review prompt meta-pass ${run.runId} collapse cancelled; review was not started.`,
+      );
+      return;
+    }
+
+    dependencies.pi.appendEntry(REVIEW_META_SUMMARY_ENTRY_TYPE, summary);
+    sendSummaryMessage(dependencies.pi, summary);
+    activeRun = null;
+    dependencies.stateManager.clearActiveRun(run.commandCtx);
+    run.commandCtx.ui.notify(`Review prompt ready: ${run.runId}`, "info");
+    scheduleMetaPromptEditorHandoff(run, result);
+  }
+
   return {
     handleReviewCommand,
     handleReviewFixCommand,
@@ -1550,6 +1865,18 @@ export function createReviewFlowController(
       }
 
       const run = activeRun;
+      if (run.kind === "meta") {
+        if (!run.owned || !agentEndMatchesMetaRun(event, run)) {
+          return;
+        }
+
+        activeRun = { ...run, owned: false };
+        setTimeout(() => {
+          void handleMetaAgentEnd(run, ctx);
+        }, 0);
+        return;
+      }
+
       if (!agentEndMatchesRun(event, run)) {
         return;
       }

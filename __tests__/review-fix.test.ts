@@ -347,6 +347,9 @@ function createHarness(options: HarnessOptions = {}) {
     },
     stateManager: {
       getState: () => currentState,
+      startMetaRun: (_ctx, state) => {
+        currentState = { version: 1, activeKind: "meta", ...state };
+      },
       startReviewRun: (_ctx, state) => {
         currentState = { version: 1, activeKind: "review", ...state };
       },
@@ -369,6 +372,7 @@ function createHarness(options: HarnessOptions = {}) {
       throw new Error("unused");
     },
     getCommentsForRun: () => [],
+    getMetaResultForRun: () => undefined,
     createRunId: () => "fix-1",
     getNow: () => 456,
     getThinkingLevel: () => "medium",
