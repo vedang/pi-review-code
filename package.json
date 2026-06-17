@@ -9,7 +9,8 @@
   },
   "keywords": ["pi-package", "pi", "extension", "review", "code-review"],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": ["./src/index.ts"],
+    "image": "https://raw.githubusercontent.com/vedang/pi-review-code/main/images/banner.png"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
