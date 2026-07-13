@@ -1,7 +1,7 @@
 import type {
   ExtensionCommandContext,
   Theme,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   Editor,
@@ -11,7 +11,7 @@ import {
   matchesKey,
   visibleWidth,
   wrapTextWithAnsi,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 import type { AddReviewCommentReference, ReviewComment } from "./types.js";
 import {

@@ -1,7 +1,7 @@
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import {
   getReviewCommentsForRun,
@@ -214,6 +214,7 @@ export default function reviewCodeExtension(pi: ExtensionAPI): void {
     controller.handleBeforeAgentStart(event, ctx),
   );
   pi.on("tool_call", (event, ctx) => controller.handleToolCall(event, ctx));
+  // Keep agent_end: controller uses this low-level boundary to schedule follow-up work.
   pi.on("agent_end", (event, ctx) => controller.handleAgentEnd(event, ctx));
   pi.on("session_before_tree", (event) =>
     controller.handleSessionBeforeTree(event),

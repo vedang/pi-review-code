@@ -89,6 +89,7 @@ test("completeReviewPromptDraftWithPiAi uses registry auth and current thinking 
         ok: true,
         apiKey: "secret",
         headers: { "x-test": "yes" },
+        env: { ANTHROPIC_REGION: "us-east-1" },
       }),
     } as never,
     thinkingLevel: "high",
@@ -114,6 +115,7 @@ test("completeReviewPromptDraftWithPiAi uses registry auth and current thinking 
   assert.deepEqual(capturedOptions, {
     apiKey: "secret",
     headers: { "x-test": "yes" },
+    env: { ANTHROPIC_REGION: "us-east-1" },
     signal: undefined,
     reasoning: "high",
   });
@@ -141,6 +143,7 @@ test("completeReviewPromptDraftWithPiAi omits reasoning when thinking is off", a
   assert.deepEqual(capturedOptions, {
     apiKey: "secret",
     headers: undefined,
+    env: undefined,
     signal: undefined,
     reasoning: undefined,
   });

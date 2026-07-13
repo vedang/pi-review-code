@@ -5,7 +5,7 @@ import type {
   SessionBeforeTreeEvent,
   ToolCallEvent,
   ToolCallEventResult,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import {
   REVIEW_FIX_USAGE,

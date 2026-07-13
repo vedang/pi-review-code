@@ -1,5 +1,11 @@
-import type { SimpleStreamOptions } from "@mariozechner/pi-ai";
-import { completeSimple } from "@mariozechner/pi-ai";
+import type {
+  Api,
+  AssistantMessage,
+  Context,
+  Model,
+  SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
+import { completeWithRegisteredApi } from "./pi-complete.js";
 import type { ReviewPromptDraftRequest } from "./prompts.js";
 
 export type DraftTextBlock = {
@@ -38,22 +44,10 @@ export type CompleteReviewDraft = (
 ) => Promise<DraftCompletion>;
 
 export type CompleteWithModel = (
-  model: unknown,
-  context: {
-    systemPrompt?: string;
-    messages: Array<{
-      role: "user";
-      content: Array<{ type: "text"; text: string }>;
-      timestamp: number;
-    }>;
-  },
-  options: {
-    apiKey?: string;
-    headers?: Record<string, string>;
-    signal?: AbortSignal;
-    reasoning?: NonNullable<SimpleStreamOptions["reasoning"]>;
-  },
-) => Promise<DraftCompletion>;
+  model: Model<Api>,
+  context: Context,
+  options?: SimpleStreamOptions,
+) => Promise<AssistantMessage>;
 
 export type GetApiKeyAndHeadersResult =
   | {
@@ -64,6 +58,7 @@ export type GetApiKeyAndHeadersResult =
       ok: true;
       apiKey?: string;
       headers?: Record<string, string>;
+      env?: Record<string, string>;
     };
 
 export interface ModelRegistryLike<TModel = unknown> {
@@ -75,7 +70,7 @@ export interface GenerateReviewPromptDraftContext {
 }
 
 export interface CompleteReviewPromptDraftWithPiAiOptions<
-  TModel extends { provider: string } = { provider: string },
+  TModel extends Model<Api> = Model<Api>,
 > {
   request: ReviewPromptDraftRequest;
   model: TModel;
@@ -167,7 +162,7 @@ export async function generateReviewPromptDraft(
 }
 
 export async function completeReviewPromptDraftWithPiAi<
-  TModel extends { provider: string },
+  TModel extends Model<Api>,
 >(
   options: CompleteReviewPromptDraftWithPiAiOptions<TModel>,
 ): Promise<DraftCompletion> {
@@ -180,8 +175,7 @@ export async function completeReviewPromptDraftWithPiAi<
     complete: injectedComplete,
   } = options;
 
-  const complete =
-    injectedComplete ?? (completeSimple as unknown as CompleteWithModel);
+  const complete = injectedComplete ?? completeWithRegisteredApi;
 
   const auth = await modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok) {
@@ -207,6 +201,7 @@ export async function completeReviewPromptDraftWithPiAi<
     {
       apiKey: auth.apiKey,
       headers: auth.headers,
+      env: auth.env,
       signal,
       reasoning: toSimpleReasoning(thinkingLevel),
     },

@@ -5,7 +5,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   RegisteredCommand,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { REVIEW_ANCHOR_MESSAGE_TYPE } from "../src/flow.js";
 import reviewCodeExtension, {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { REVIEW_FIX_USAGE } from "../src/command.js";
 import {
   REVIEW_FIX_SUMMARY_ENTRY_TYPE,

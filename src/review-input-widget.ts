@@ -1,7 +1,7 @@
 import type {
   ExtensionCommandContext,
   Theme,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   Editor,
@@ -9,7 +9,7 @@ import {
   Key,
   type TUI,
   matchesKey,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 import {
   type SubmitCancelAction,
